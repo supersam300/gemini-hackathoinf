@@ -143,36 +143,6 @@ npx tailwindcss init -p
 ```bash
 npm run dev
 ```
-
-## Design Reference
-- Figma Design: [Sprint 1 Framework Design](https://www.figma.com/)
-- Canvas: 1440x900px
-- Color Scheme: Dark theme (#1E1E1E background, #2D2D2D panels)
-
-## Sprint 1 Deliverables
-1. ✅ Working Vite + React + TypeScript setup
-2. ✅ Responsive layout with header, sidebar, canvas, editor
-3. ✅ Component palette with draggable components
-4. ✅ React Flow canvas accepting dropped components
-5. ✅ Monaco editor with C/C++ syntax highlighting
-6. ✅ Zustand state management for diagram and editor
-7. ✅ localStorage save/load functionality
-8. ✅ Basic UI styled with Tailwind CSS
-
-## Next Sprints (Future)
-- **Sprint 2**: Component logic and connections
-- **Sprint 3**: Code compilation and simulation
-- **Sprint 4**: Microcontroller integration and upload
-- **Sprint 5**: Advanced features and optimization
-
-## Development Guidelines
-- Use TypeScript for type safety
-- Follow React best practices (hooks, functional components)
-- Use Tailwind utility classes for styling
-- Keep components modular and reusable
-- Document complex logic with comments
-- Test drag-and-drop and save/load thoroughly
-
 ## Resources
 - [React Flow Docs](https://reactflow.dev/)
 - [Monaco Editor Docs](https://microsoft.github.io/monaco-editor/)
