@@ -1,0 +1,37 @@
+.connection-edge-group {
+  cursor: pointer;
+}
+
+.connection-edge {
+  stroke: #667eea;
+  stroke-width: 2px;
+  fill: none;
+  transition: all 0.2s ease;
+  pointer-events: stroke;
+}
+
+.connection-edge:hover {
+  stroke: #764ba2;
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 4px rgba(102, 126, 234, 0.5));
+}
+
+.connection-edge.selected {
+  stroke: #fbbf24;
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.6));
+}
+
+.edge-label {
+  font-size: 12px;
+  fill: #333;
+  font-weight: 600;
+  pointer-events: none;
+  background: white;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.react-flow__edge-path {
+  pointer-events: all;
+}

@@ -1,0 +1,63 @@
+.component-node {
+  padding: 12px;
+  border: 2px solid #333;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+  cursor: grab;
+  min-width: 100px;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.component-node:hover {
+  box-shadow: 0 8px 12px rgba(0, 0, 0, 0.2);
+}
+
+.component-node.selected {
+  border-color: #fbbf24;
+  border-width: 3px;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
+}
+
+.component-node:active {
+  cursor: grabbing;
+}
+
+.component-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.component-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.component-label {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.react-flow__handle {
+  background: #667eea;
+  border: 2px solid white;
+  width: 10px;
+  height: 10px;
+}
+
+.react-flow__handle:hover {
+  background: #764ba2;
+}
+
+.react-flow__handle.valid-connection {
+  background: #10b981;
+}
