@@ -1,0 +1,26 @@
+# Development Dockerfile with hot reload support
+# Use with: docker build -f Dockerfile.dev -t gemini-hackathon-dev .
+# And: docker run -p 5173:5173 -v $(pwd):/app gemini-hackathon-dev
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package.json
+COPY package.json package-lock.json* ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy the entire project
+COPY . .
+
+# Expose Vite dev server port
+EXPOSE 5173
+
+# Environment variables
+ENV NODE_ENV=development
+ENV VITE_HOST=0.0.0.0
+
+# Run the development server
+CMD ["npm", "run", "dev"]

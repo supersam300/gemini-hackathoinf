@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # Main web application
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gemini-hackathon-web
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - gemini-network
+
+  # Optional: MongoDB service (if you want to use MongoDB locally)
+  # Uncomment if you're developing with MongoDB
+  # mongodb:
+  #   image: mongo:7
+  #   container_name: gemini-mongodb
+  #   ports:
+  #     - "27017:27017"
+  #   environment:
+  #     MONGO_INITDB_ROOT_USERNAME: admin
+  #     MONGO_INITDB_ROOT_PASSWORD: password
+  #     MONGO_INITDB_DATABASE: gemini_hackathon
+  #   volumes:
+  #     - mongodb_data:/data/db
+  #   restart: unless-stopped
+  #   networks:
+  #     - gemini-network
+
+volumes:
+  # mongodb_data:
+
+networks:
+  gemini-network:
+    driver: bridge

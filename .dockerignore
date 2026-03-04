@@ -1,0 +1,48 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Node
+node_modules
+npm-debug.log
+yarn-error.log
+package-lock.json
+
+# Build artifacts
+dist
+build
+.vite
+
+# IDE and Editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+.env.local
+.env.*.local
+
+# Testing
+.coverage
+.nyc_output
+
+# Documentation
+*.md
+README.md
+MONGODB_EXPORT.md
+PROJECT_STRUCTURE.md
+
+# Development
+.eslintcache
+tsconfig.tsbuildinfo
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# CI/CD
+.github
+.gitlab-ci.yml

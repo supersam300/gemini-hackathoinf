@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # Development web application with hot reload
+  web-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: gemini-hackathon-dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      NODE_ENV: development
+      VITE_HOST: 0.0.0.0
+    restart: unless-stopped
+    networks:
+      - gemini-network-dev
+    stdin_open: true
+    tty: true
+
+networks:
+  gemini-network-dev:
+    driver: bridge
