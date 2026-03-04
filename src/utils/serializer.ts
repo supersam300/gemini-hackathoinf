@@ -140,4 +140,107 @@ export const serializer = {
   decompress: (compressed: string): DiagramState | null => {
     return serializer.importDiagram(compressed);
   },
+
+  /**
+   * Export diagram in MongoDB-compatible format
+   * Transforms the flat diagram structure into a nested MongoDB document
+   */
+  exportToMongoDB: (
+    diagram: DiagramState,
+    projectId: string = "proj_default",
+    projectName: string = "Untitled Circuit"
+  ): object => {
+    try {
+      const now = new Date().toISOString();
+
+      // Transform nodes into MongoDB components array
+      const components = diagram.nodes.map((node, index) => {
+        const nodeData = node.data as any;
+        return {
+          _id: `${projectId}_node_${index + 1}`,
+          nodeId: node.id,
+          type: node.type,
+          componentType: nodeData?.componentId || "unknown",
+          label: nodeData?.label || `Component ${index + 1}`,
+          position: {
+            x: node.position.x,
+            y: node.position.y,
+          },
+          properties: nodeData?.properties || {},
+          handles: {
+            inputs: nodeData?.inputs || [],
+            outputs: nodeData?.outputs || [],
+          },
+        };
+      });
+
+      // Transform edges into MongoDB connections array
+      const connections = diagram.edges.map((edge, index) => {
+        const edgeData = edge.data as any;
+        const sourceNode = diagram.nodes.find((n) => n.id === edge.source);
+        const targetNode = diagram.nodes.find((n) => n.id === edge.target);
+        const sourceData = sourceNode?.data as any;
+        const targetData = targetNode?.data as any;
+
+        return {
+          _id: `${projectId}_edge_${index + 1}`,
+          edgeId: edge.id,
+          from: {
+            nodeId: edge.source,
+            componentType: sourceData?.componentId || "unknown",
+            handle: edgeData?.sourceHandle || "source",
+          },
+          to: {
+            nodeId: edge.target,
+            componentType: targetData?.componentId || "unknown",
+            handle: edgeData?.targetHandle || "target",
+          },
+          type: edge.type,
+        };
+      });
+
+      // Build the MongoDB document
+      const mongoDocument = {
+        _id: `circuit_${projectId}_${Date.now()}`,
+        projectId,
+        projectName,
+        createdAt: now,
+        updatedAt: now,
+        description: "",
+        tags: [],
+        components,
+        connections,
+        metadata: {
+          version: "1.0",
+          simulationSettings: {
+            totalTime: 10,
+            timeStep: 0.001,
+          },
+          author: "user",
+          isPublic: false,
+        },
+      };
+
+      return mongoDocument;
+    } catch (error) {
+      console.error("Failed to export diagram to MongoDB format:", error);
+      return {};
+    }
+  },
+
+  /**
+   * Export MongoDB format as JSON string (ready to save/send to database)
+   */
+  exportToMongoDBJSON: (
+    diagram: DiagramState,
+    projectId?: string,
+    projectName?: string
+  ): string => {
+    const mongoDoc = serializer.exportToMongoDB(
+      diagram,
+      projectId,
+      projectName
+    );
+    return JSON.stringify(mongoDoc, null, 2);
+  },
 };

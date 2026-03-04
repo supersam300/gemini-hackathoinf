@@ -1,5 +1,8 @@
 import type { Project } from "../types/project";
+import type { DiagramState } from "../types/diagram";
 import { STORAGE_KEY_PROJECT, STORAGE_KEY_RECENT_PROJECTS } from "../constants/config";
+import { serializer } from "./serializer";
+
 
 /**
  * LocalStorage utilities for persisting projects and diagrams
@@ -117,6 +120,57 @@ export const storage = {
       localStorage.clear();
     } catch (error) {
       console.error("Failed to clear storage:", error);
+    }
+  },
+
+  /**
+   * Export diagram in MongoDB format as JSON string
+   * Ready to be saved to file or sent to database
+   */
+  exportDiagramToMongoDB: (
+    diagram: DiagramState,
+    projectId: string = "proj_default",
+    projectName: string = "Untitled Circuit"
+  ): string => {
+    return serializer.exportToMongoDBJSON(diagram, projectId, projectName);
+  },
+
+  /**
+   * Export diagram in MongoDB format as JavaScript object
+   */
+  exportDiagramToMongoDBObject: (
+    diagram: DiagramState,
+    projectId?: string,
+    projectName?: string
+  ): object => {
+    return serializer.exportToMongoDB(diagram, projectId, projectName);
+  },
+
+  /**
+   * Download MongoDB JSON format as a file
+   */
+  downloadMongoDBJSON: (
+    diagram: DiagramState,
+    projectId: string = "proj_default",
+    projectName: string = "Untitled Circuit"
+  ): void => {
+    try {
+      const jsonString = storage.exportDiagramToMongoDB(
+        diagram,
+        projectId,
+        projectName
+      );
+      const blob = new Blob([jsonString], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${projectId}-mongodb-${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Failed to download MongoDB JSON:", error);
     }
   },
 };

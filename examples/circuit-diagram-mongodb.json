@@ -1,0 +1,139 @@
+{
+  "_id": "circuit_led_circuit_001",
+  "projectId": "proj_001",
+  "projectName": "LED Circuit",
+  "createdAt": "2026-03-04T10:30:00Z",
+  "updatedAt": "2026-03-04T10:45:30Z",
+  "description": "Simple LED circuit with resistor",
+  "tags": ["led", "resistor", "basic"],
+  "components": [
+    {
+      "_id": "node_1",
+      "nodeId": "node-led-1709521800000",
+      "type": "componentNode",
+      "componentType": "led",
+      "label": "LED",
+      "position": {
+        "x": 120,
+        "y": 85
+      },
+      "properties": {
+        "color": "red",
+        "brightness": 100
+      },
+      "handles": {
+        "inputs": ["in-0"],
+        "outputs": ["out-0"]
+      }
+    },
+    {
+      "_id": "node_2",
+      "nodeId": "node-resistor-1709521801000",
+      "type": "componentNode",
+      "componentType": "resistor",
+      "label": "Resistor",
+      "position": {
+        "x": 300,
+        "y": 85
+      },
+      "properties": {
+        "resistance": "1k",
+        "tolerance": "5%"
+      },
+      "handles": {
+        "inputs": ["in-0"],
+        "outputs": ["out-0"]
+      }
+    },
+    {
+      "_id": "node_3",
+      "nodeId": "node-vcc-1709521802000",
+      "type": "componentNode",
+      "componentType": "vcc",
+      "label": "VCC",
+      "position": {
+        "x": 50,
+        "y": 50
+      },
+      "properties": {
+        "voltage": "5V"
+      },
+      "handles": {
+        "inputs": [],
+        "outputs": ["out-0"]
+      }
+    },
+    {
+      "_id": "node_4",
+      "nodeId": "node-ground-1709521803000",
+      "type": "componentNode",
+      "componentType": "ground",
+      "label": "Ground",
+      "position": {
+        "x": 450,
+        "y": 120
+      },
+      "properties": {},
+      "handles": {
+        "inputs": ["in-0"],
+        "outputs": []
+      }
+    }
+  ],
+  "connections": [
+    {
+      "_id": "edge_1",
+      "edgeId": "edge-node-vcc-1709521802000-node-resistor-1709521801000-1709521804000",
+      "from": {
+        "nodeId": "node-vcc-1709521802000",
+        "componentType": "vcc",
+        "handle": "out-0"
+      },
+      "to": {
+        "nodeId": "node-resistor-1709521801000",
+        "componentType": "resistor",
+        "handle": "in-0"
+      },
+      "type": "connection"
+    },
+    {
+      "_id": "edge_2",
+      "edgeId": "edge-node-resistor-1709521801000-node-led-1709521800000-1709521805000",
+      "from": {
+        "nodeId": "node-resistor-1709521801000",
+        "componentType": "resistor",
+        "handle": "out-0"
+      },
+      "to": {
+        "nodeId": "node-led-1709521800000",
+        "componentType": "led",
+        "handle": "in-0"
+      },
+      "type": "connection"
+    },
+    {
+      "_id": "edge_3",
+      "edgeId": "edge-node-led-1709521800000-node-ground-1709521803000-1709521806000",
+      "from": {
+        "nodeId": "node-led-1709521800000",
+        "componentType": "led",
+        "handle": "out-0"
+      },
+      "to": {
+        "nodeId": "node-ground-1709521803000",
+        "componentType": "ground",
+        "handle": "in-0"
+      },
+      "type": "connection"
+    }
+  ],
+  "metadata": {
+    "version": "1.0",
+    "simulationSettings": {
+      "totalTime": 10,
+      "timeStep": 0.001
+    },
+    "author": "user123",
+    "isPublic": false
+  }
+}
