@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -37,6 +37,14 @@ export default function Canvas() {
     selectEdge,
   } = useDiagramStore();
 
+  // refs for the container and the flow instance used when dropping nodes
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [rfInstance, setRfInstance] = useState<any>(null);
+
+  const onInit = useCallback((instance: any) => {
+    setRfInstance(instance);
+  }, []);
+
   // Handle new connections
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -61,10 +69,16 @@ export default function Canvas() {
     [setEdges, addDiagramEdge]
   );
 
-  // Handle drop to add component
+  // Handle drop to add component (only when dragging from palette)
   const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const types = Array.from(event.dataTransfer.types || []);
+    if (!types.includes("application/componentId")) {
+      // allow normal ReactFlow behavior (node dragging, selection, etc.)
+      return;
+    }
     event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
+    // explorer sets effectAllowed = "copy" so we must mirror that here
+    event.dataTransfer.dropEffect = "copy";
   }, []);
 
   const onDrop = useCallback(
@@ -72,20 +86,19 @@ export default function Canvas() {
       event.preventDefault();
 
       const componentId = event.dataTransfer.getData("application/componentId");
+      if (!componentId) return;
       const componentDef = COMPONENTS.find((c) => c.id === componentId);
+      if (!componentDef || !wrapperRef.current) return;
 
-      if (!componentDef) return;
-
-      // Get canvas bounds to calculate drop position
-      const canvasElement = event.currentTarget;
-      const rect = canvasElement.getBoundingClientRect();
+      const rect = wrapperRef.current.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
+      const position = rfInstance ? rfInstance.project({ x, y }) : { x, y };
 
       const newNode: DiagramNode = {
         id: `node-${componentId}-${Date.now()}`,
         type: "componentNode",
-        position: { x, y },
+        position,
         data: {
           componentId,
           label: componentDef.name,
@@ -102,7 +115,7 @@ export default function Canvas() {
       setNodes((n) => [...n, newNode]);
       addNode(newNode);
     },
-    [setNodes, addNode]
+    [setNodes, addNode, rfInstance]
   );
 
   // Handle node/edge selection
@@ -171,10 +184,16 @@ export default function Canvas() {
   );
 
   return (
-    <div style={{ width: "100%", height: "100%" }}>
+    <div
+      ref={wrapperRef}
+      style={{ width: "100%", height: "100%" }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        onInit={onInit}
         onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
