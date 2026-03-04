@@ -2,14 +2,9 @@ import { useCallback, useRef } from "react";
 import Editor, { OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { useEditorStore } from "../../store/editorStore";
+import { useArduinoStore } from "../../store/arduinoStore";
 import EditorToolbar from "./EditorToolbar";
-
-/**
- * Monaco Editor wrapper component
- *
- * Integrates Monaco Editor for code editing
- * Supports C, C++, and Python
- */
+import ArduinoToolbar from "../arduino/ArduinoToolbar";
 
 const LANGUAGE_MAP: Record<"c" | "cpp" | "python", string> = {
   c: "c",
@@ -19,54 +14,56 @@ const LANGUAGE_MAP: Record<"c" | "cpp" | "python", string> = {
 
 export default function CodeEditor() {
   const { code, language, setCode, setLanguage } = useEditorStore();
+  const { compile, upload } = useArduinoStore();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
   const handleEditorMount: OnMount = useCallback((editorInstance) => {
     editorRef.current = editorInstance;
     editorInstance.focus();
 
-    // Bind Ctrl+Enter to run
+    // Ctrl+Enter → compile
     editorInstance.addCommand(
-      // Ctrl+Enter keybinding
       2048 /* KeyMod.CtrlCmd */ | 3 /* KeyCode.Enter */,
-      () => {
-        console.log("Run triggered via Ctrl+Enter");
-      }
+      () => compile(editorRef.current?.getValue() ?? "")
     );
-  }, []);
+  }, [compile]);
 
   const handleCodeChange = useCallback(
-    (value: string | undefined) => {
-      setCode(value ?? "");
-    },
+    (value: string | undefined) => { setCode(value ?? ""); },
     [setCode]
   );
 
   const handleLanguageChange = useCallback(
-    (newLanguage: "c" | "cpp" | "python") => {
-      setLanguage(newLanguage);
-    },
+    (newLanguage: "c" | "cpp" | "python") => { setLanguage(newLanguage); },
     [setLanguage]
   );
 
-  /** Trigger Monaco's built-in document formatter (Shift+Alt+F) */
   const handleFormat = useCallback(() => {
-    editorRef.current
-      ?.getAction("editor.action.formatDocument")
-      ?.run();
+    editorRef.current?.getAction("editor.action.formatDocument")?.run();
   }, []);
+
+  const handleCompile = useCallback(() => {
+    compile(editorRef.current?.getValue() ?? code);
+  }, [compile, code]);
+
+  const handleUpload = useCallback(() => {
+    upload(editorRef.current?.getValue() ?? code);
+  }, [upload, code]);
 
   const lineCount = code.split("\n").length;
 
   return (
     <div className="flex flex-col h-full bg-gray-900 text-gray-100">
-      {/* Toolbar */}
+      {/* Arduino toolbar (board / port / compile / upload) */}
+      <ArduinoToolbar code={code} />
+
+      {/* Editor language / format / reset toolbar */}
       <EditorToolbar
         language={language}
         onLanguageChange={handleLanguageChange}
         onFormat={handleFormat}
-        onCompile={() => console.log("Compile:", language, code)}
-        onRun={() => console.log("Run:", language, code)}
+        onCompile={handleCompile}
+        onUpload={handleUpload}
       />
 
       {/* Monaco Editor */}
