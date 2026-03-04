@@ -24,8 +24,12 @@ const grouped = groupByCategory(COMPONENTS);
 
 function ComponentItem({ component }: { component: ComponentDefinition }) {
   const handleDragStart = (e: DragEvent<HTMLDivElement>) => {
+    console.log("palette dragstart", component.id);
     // Send component ID in correct format
     e.dataTransfer.setData("application/componentId", component.id);
+    // also provide a plain-text payload which some browsers require to allow
+    // drops between elements
+    e.dataTransfer.setData("text/plain", component.id);
     e.dataTransfer.effectAllowed = "copy";
   };
 

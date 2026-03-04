@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -40,9 +40,11 @@ export default function Canvas() {
   // refs for the container and the flow instance used when dropping nodes
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [rfInstance, setRfInstance] = useState<any>(null);
+  const [draggingOver, setDraggingOver] = useState(false);
 
   const onInit = useCallback((instance: any) => {
     setRfInstance(instance);
+    console.log("rfInstance onInit", Object.keys(instance));
   }, []);
 
   // Handle new connections
@@ -70,30 +72,49 @@ export default function Canvas() {
   );
 
   // Handle drop to add component (only when dragging from palette)
+  // simpler drag-over handler – always prevent default so drops are allowed
   const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    const types = Array.from(event.dataTransfer.types || []);
-    if (!types.includes("application/componentId")) {
-      // allow normal ReactFlow behavior (node dragging, selection, etc.)
-      return;
-    }
+    console.log("canvas onDragOver", {
+      target: event.target,
+      types: Array.from(event.dataTransfer.types || []),
+      compId: event.dataTransfer.getData("application/componentId"),
+    });
+    setDraggingOver(true);
     event.preventDefault();
-    // explorer sets effectAllowed = "copy" so we must mirror that here
     event.dataTransfer.dropEffect = "copy";
   }, []);
 
   const onDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
+      setDraggingOver(false);
+      console.log("canvas onDrop", {
+        target: event.target,
+        types: Array.from(event.dataTransfer.types || []),
+        compId: event.dataTransfer.getData("application/componentId"),
+      });
 
       const componentId = event.dataTransfer.getData("application/componentId");
       if (!componentId) return;
       const componentDef = COMPONENTS.find((c) => c.id === componentId);
+      console.log("componentDef from drop", componentDef);
       if (!componentDef || !wrapperRef.current) return;
 
       const rect = wrapperRef.current.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
-      const position = rfInstance ? rfInstance.project({ x, y }) : { x, y };
+      let position;
+      if (rfInstance && typeof rfInstance.getViewport === "function") {
+        const vp = rfInstance.getViewport();
+        position = {
+          x: (x - vp.x) / vp.zoom,
+          y: (y - vp.y) / vp.zoom,
+        };
+        console.log("viewport", vp);
+      } else {
+        position = { x, y };
+      }
+      console.log("computed drop position", position);
 
       const newNode: DiagramNode = {
         id: `node-${componentId}-${Date.now()}`,
@@ -112,10 +133,24 @@ export default function Canvas() {
         },
       };
 
-      setNodes((n) => [...n, newNode]);
+      setNodes((n) => {
+        const result = [...n, newNode];
+        console.log("nodes after setNodes", result);
+        return result;
+      });
       addNode(newNode);
+      if (rfInstance) {
+        // make sure the new node is visible
+        try {
+          rfInstance.fitView({ padding: 0.2, nodes: [newNode] });
+        } catch (e) {
+          console.warn("fitView failed", e);
+        }
+      } else {
+        console.log("rfInstance not available for fitView");
+      }
     },
-    [setNodes, addNode, rfInstance]
+    [setNodes, addNode]
   );
 
   // Handle node/edge selection
@@ -183,12 +218,26 @@ export default function Canvas() {
     []
   );
 
+  // global listeners to observe dragging anywhere on window (for debugging)
+  useEffect(() => {
+    const handle = (ev: DragEvent) => {
+      console.log("window drag event", ev.type, ev.target, ev.dataTransfer ? Array.from(ev.dataTransfer.types) : []);
+    };
+    window.addEventListener("dragover", handle);
+    window.addEventListener("drop", handle);
+    return () => {
+      window.removeEventListener("dragover", handle);
+      window.removeEventListener("drop", handle);
+    };
+  }, []);
+
   return (
     <div
       ref={wrapperRef}
-      style={{ width: "100%", height: "100%" }}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
+      className={`w-full h-full ${draggingOver ? 'border-4 border-blue-400' : ''}`}
+      onDragOverCapture={onDragOver}
+      onDropCapture={onDrop}
+      onDragLeaveCapture={() => setDraggingOver(false)}
     >
       <ReactFlow
         nodes={nodes}
@@ -202,8 +251,6 @@ export default function Canvas() {
         onPaneClick={onPaneClick}
         onNodesDelete={onNodesDelete}
         onEdgesDelete={onEdgesDelete}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
         nodesDraggable={true}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
