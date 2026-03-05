@@ -47,6 +47,16 @@ export default function Canvas() {
     console.log("rfInstance onInit", Object.keys(instance));
   }, []);
 
+  // Resync local React Flow state when the Zustand store changes
+  // (e.g. after loading a circuit from MongoDB)
+  useEffect(() => {
+    setNodes((storeNodes as Node[]) || []);
+  }, [storeNodes]);
+
+  useEffect(() => {
+    setEdges((storeEdges as Edge[]) || []);
+  }, [storeEdges]);
+
   // Handle new connections
   const onConnect = useCallback(
     (connection: Connection) => {
