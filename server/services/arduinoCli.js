@@ -61,11 +61,27 @@ async function compileSketch(code, fqbn) {
         const result = await runArduinoCli([
             "compile",
             "--fqbn", fqbn,
+            "--output-dir", sketchDir,
             "--log-level", "info",
             "--format", "text",
             sketchDir,
         ]);
-        return result;
+
+        // Try to read the .hex file for simulation
+        let hex = null;
+        if (result.success) {
+            try {
+                const files = fs.readdirSync(sketchDir);
+                const hexFile = files.find((f) => f.endsWith(".hex"));
+                if (hexFile) {
+                    hex = fs.readFileSync(path.join(sketchDir, hexFile), "utf-8");
+                }
+            } catch {
+                // hex reading is optional
+            }
+        }
+
+        return { ...result, hex };
     } finally {
         fs.rmSync(sketchDir, { recursive: true, force: true });
     }

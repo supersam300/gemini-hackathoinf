@@ -27,4 +27,5 @@ export interface ArduinoApiResponse {
     success: boolean;
     output: string;
     error?: string;
+    hex?: string;
 }

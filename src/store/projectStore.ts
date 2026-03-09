@@ -160,7 +160,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
           data: {
             componentId: comp.componentType,
             label: comp.label,
-            properties: comp.properties || {},
+            properties: (comp.properties || {}) as Record<string, string | number | boolean>,
             inputs: comp.handles?.inputs || [],
             outputs: comp.handles?.outputs || [],
           },
