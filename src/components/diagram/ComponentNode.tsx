@@ -1,7 +1,21 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { useRef, useEffect } from "react";
 import { useDiagramStore } from "../../store/diagramStore";
 import { COMPONENTS } from "../../constants/components";
+import "@wokwi/elements";
 import "../styles/ComponentNode.css";
+
+function WokwiElement({ tag }: { tag: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current && !ref.current.querySelector(tag)) {
+      ref.current.innerHTML = "";
+      const el = document.createElement(tag);
+      ref.current.appendChild(el);
+    }
+  }, [tag]);
+  return <div ref={ref} className="wokwi-element-wrapper" />;
+}
 
 export default function ComponentNode(props: NodeProps<any>) {
   const { data, selected, id } = props;
@@ -16,9 +30,11 @@ export default function ComponentNode(props: NodeProps<any>) {
     selectNode(id);
   };
 
+  const hasWokwi = !!componentDef.wokwiTag;
+
   return (
     <div
-      className={`component-node ${selected ? "selected" : ""}`}
+      className={`component-node ${selected ? "selected" : ""} ${hasWokwi ? "has-wokwi" : ""}`}
       onClick={handleClick}
     >
       {/* Input handles */}
@@ -37,7 +53,11 @@ export default function ComponentNode(props: NodeProps<any>) {
 
       {/* Component display */}
       <div className="component-content">
-        <div className="component-icon">{componentDef.icon}</div>
+        {hasWokwi ? (
+          <WokwiElement tag={componentDef.wokwiTag!} />
+        ) : (
+          <div className="component-icon">{componentDef.icon}</div>
+        )}
         <div className="component-label">{data?.label}</div>
       </div>
 

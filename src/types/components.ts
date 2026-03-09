@@ -10,6 +10,8 @@ export interface ComponentDefinition {
   description: string;
   /** Icon identifier or emoji */
   icon: string;
+  /** Wokwi web-component tag name (e.g. "wokwi-led") */
+  wokwiTag?: string;
   /** Number of input pins */
   inputs: number;
   /** Number of output pins */
