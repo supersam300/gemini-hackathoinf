@@ -269,7 +269,13 @@ export default function Canvas() {
       >
         <Background />
         <Controls />
-        <MiniMap />
+        <MiniMap
+          nodeColor="#667eea"
+          nodeStrokeColor="#334155"
+          nodeBorderRadius={4}
+          maskColor="rgba(15, 23, 42, 0.7)"
+          style={{ backgroundColor: "#1e293b" }}
+        />
       </ReactFlow>
     </div>
   );
