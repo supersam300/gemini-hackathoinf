@@ -40,17 +40,13 @@ export class ArduinoSimulator {
   private cpu: CPU;
   // Peripherals register hooks on the CPU during construction.
   // We must keep references so they aren't garbage-collected.
-  // @ts-expect-error kept alive for CPU hooks
   private clock: AVRClock;
   private portB: AVRIOPort;
   private portC: AVRIOPort;
   private portD: AVRIOPort;
   private usart: AVRUSART;
-  // @ts-expect-error kept alive for CPU hooks
   private timer0: AVRTimer;
-  // @ts-expect-error kept alive for CPU hooks
   private timer1: AVRTimer;
-  // @ts-expect-error kept alive for CPU hooks
   private timer2: AVRTimer;
   private running = false;
   private animFrameId: number | null = null;
