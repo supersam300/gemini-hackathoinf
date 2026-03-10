@@ -14,14 +14,14 @@ SimuIDE Web is a browser-based Arduino circuit simulator and IDE built with **Re
 │  MenuBar · MainToolbar · CircuitCanvas · ComponentPanel   │
 │  AIPanel · FilePanel · Editor · BottomPanel · StatusBar   │
 ├───────────────────────────────────────────────────────────┤
-│                 Zustand State Stores                       │
+│                 Zustand State Stores                      │
 │  projectStore · diagramStore · editorStore                │
 │  arduinoStore · simulationStore                           │
 ├───────────────────────────────────────────────────────────┤
-│                API & Services Layer                        │
+│                API & Services Layer                       │
 │  circuits API · arduino API · simulation service (avr8js) │
 ├───────────────────────────────────────────────────────────┤
-│              Node.js Backend (port 3001)                   │
+│              Node.js Backend (port 3001)                  │
 │  MongoDB persistence · Arduino CLI compile/upload         │
 └───────────────────────────────────────────────────────────┘
 ```
