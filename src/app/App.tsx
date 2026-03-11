@@ -566,7 +566,7 @@ export default function App() {
         const connectedIds = new Set<string>();
         wiresState.forEach(w => { connectedIds.add(w.fromComponentId); connectedIds.add(w.toComponentId); });
         const issues = components.filter(c =>
-          !connectedIds.has(c.id) && !['arduino-uno','arduino-nano','arduino-mega','esp32'].includes(c.type)
+          !connectedIds.has(c.id) && !['arduino-uno', 'arduino-nano', 'arduino-mega', 'esp32'].includes(c.type)
         );
         if (issues.length === 0) {
           setStatusMessage('DRC passed — no issues found');
@@ -654,7 +654,7 @@ export default function App() {
         <div className="flex items-center gap-2.5">
           <div className="w-5 h-5 rounded bg-gradient-to-br from-[#4facfe] to-[#00f2fe] flex items-center justify-center shadow-sm">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
             </svg>
           </div>
           <span className="text-[12px] font-semibold text-[#e0e0e0] tracking-wide">SimuIDE</span>
@@ -685,24 +685,21 @@ export default function App() {
               <Settings size={14} className="text-[#9aa8c0]" />
             </button>
             {settingsOpen && (
-              <div className={`absolute right-0 top-full mt-1 w-[200px] rounded-lg shadow-xl z-[100] ${
-                dm ? 'bg-[#2d2d30] border border-[#3c3c3c]' : 'bg-white border border-[#c0c0c0]'
-              }`}>
+              <div className={`absolute right-0 top-full mt-1 w-[200px] rounded-lg shadow-xl z-[100] ${dm ? 'bg-[#2d2d30] border border-[#3c3c3c]' : 'bg-white border border-[#c0c0c0]'
+                }`}>
                 <div className="py-1">
                   <button
                     onClick={() => setShowGrid(g => !g)}
-                    className={`flex items-center gap-2.5 w-full px-3 py-2 text-[12px] transition-colors ${
-                      dm ? 'text-[#ccc] hover:bg-[#3c3c3c]' : 'text-[#333] hover:bg-[#e8ecf0]'
-                    }`}
+                    className={`flex items-center gap-2.5 w-full px-3 py-2 text-[12px] transition-colors ${dm ? 'text-[#ccc] hover:bg-[#3c3c3c]' : 'text-[#333] hover:bg-[#e8ecf0]'
+                      }`}
                   >
                     <Grid3X3 size={14} className={showGrid ? 'text-[#0078d7]' : (dm ? 'text-[#666]' : 'text-[#888]')} />
                     <span>{showGrid ? 'Hide Grid' : 'Show Grid'}</span>
                   </button>
                   <button
                     onClick={() => setDarkMode(d => !d)}
-                    className={`flex items-center gap-2.5 w-full px-3 py-2 text-[12px] transition-colors ${
-                      dm ? 'text-[#ccc] hover:bg-[#3c3c3c]' : 'text-[#333] hover:bg-[#e8ecf0]'
-                    }`}
+                    className={`flex items-center gap-2.5 w-full px-3 py-2 text-[12px] transition-colors ${dm ? 'text-[#ccc] hover:bg-[#3c3c3c]' : 'text-[#333] hover:bg-[#e8ecf0]'
+                      }`}
                   >
                     {dm ? <Sun size={14} className="text-[#f59e0b]" /> : <Moon size={14} className="text-[#555]" />}
                     <span>{dm ? 'Light Mode' : 'Dark Mode'}</span>
@@ -733,6 +730,7 @@ export default function App() {
         onRedo={handleRedo}
         onResetView={() => window.dispatchEvent(new CustomEvent('simuide-reset-view'))}
         darkMode={darkMode}
+        activeView={activeView}
         boardName={(() => {
           const boardTypes: Record<string, string> = {
             'arduino-uno': 'Arduino Uno', 'arduino-nano': 'Arduino Nano',
@@ -745,31 +743,37 @@ export default function App() {
 
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">
-        <FilePanel
-          collapsed={filePanelCollapsed}
-          onToggleCollapse={() => setFilePanelCollapsed(c => !c)}
-          entries={fileEntries}
-          onAddEntries={(newEntries) => setFileEntries(prev => [...prev, ...newEntries])}
-          onRemoveEntry={(id) => {
-            const removeById = (entries: FileEntry[]): FileEntry[] =>
-              entries.filter(e => e.id !== id).map(e =>
-                e.children ? { ...e, children: removeById(e.children) } : e
-              );
-            setFileEntries(prev => removeById(prev));
-            if (activeFileId === id) setActiveFileId(null);
-          }}
-          onOpenFile={(file) => {
-            setActiveFileId(file.id);
-            setStatusMessage(`Opened ${file.name}`);
-          }}
-          activeFileId={activeFileId}
-          darkMode={darkMode}
-        />
-        <ComponentPanel
-          selectedComponent={selectedLibComponent}
-          onSelectComponent={handleSelectLibComponent}
-          darkMode={darkMode}
-        />
+        {/* File panel: only visible in code-editor mode */}
+        {activeView === 'code-editor' && (
+          <FilePanel
+            collapsed={filePanelCollapsed}
+            onToggleCollapse={() => setFilePanelCollapsed(c => !c)}
+            entries={fileEntries}
+            onAddEntries={(newEntries) => setFileEntries(prev => [...prev, ...newEntries])}
+            onRemoveEntry={(id) => {
+              const removeById = (entries: FileEntry[]): FileEntry[] =>
+                entries.filter(e => e.id !== id).map(e =>
+                  e.children ? { ...e, children: removeById(e.children) } : e
+                );
+              setFileEntries(prev => removeById(prev));
+              if (activeFileId === id) setActiveFileId(null);
+            }}
+            onOpenFile={(file) => {
+              setActiveFileId(file.id);
+              setStatusMessage(`Opened ${file.name}`);
+            }}
+            activeFileId={activeFileId}
+            darkMode={darkMode}
+          />
+        )}
+        {/* Component panel: only visible in simulation mode */}
+        {activeView === 'simulation' && (
+          <ComponentPanel
+            selectedComponent={selectedLibComponent}
+            onSelectComponent={handleSelectLibComponent}
+            darkMode={darkMode}
+          />
+        )}
 
         {/* Center area: switches between canvas and code editor */}
         {activeView === 'simulation' ? (
