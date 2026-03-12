@@ -40,6 +40,7 @@ function parseHex(hex: string): Uint8Array {
 
 export type PinChangeCallback = (port: string, pin: number, value: boolean) => void;
 export type SerialCallback = (char: string) => void;
+export type I2CWriteCallback = (addr: number, data: number[]) => void;
 
 const CPU_FREQ = 16e6;
 
@@ -63,6 +64,7 @@ export class ArduinoSimulator {
 
   onPinChange?: PinChangeCallback;
   onSerialOutput?: SerialCallback;
+  onI2CWrite?: I2CWriteCallback;
 
   constructor() {
     this.cpu = new CPU(new Uint16Array(16384)); // 32KB flash = 16K words
@@ -77,6 +79,36 @@ export class ArduinoSimulator {
     this.adc = new AVRADC(this.cpu, adcConfig);
     this.twi = new AVRTWI(this.cpu, twiConfig, CPU_FREQ);
     this.spi = new AVRSPI(this.cpu, spiConfig, CPU_FREQ);
+
+    let twiBuffer: number[] = [];
+    let twiAddr = 0;
+    let twiWrite = true;
+
+    this.twi.eventHandler = {
+      start: (repeated: boolean) => {
+        twiBuffer = [];
+        this.twi.completeStart();
+      },
+      stop: () => {
+        if (twiWrite && twiBuffer.length > 0) {
+           this.onI2CWrite?.(twiAddr, twiBuffer);
+        }
+        this.twi.completeStop();
+      },
+      connectToSlave: (addr: number, write: boolean) => {
+        twiAddr = addr;
+        twiWrite = write;
+        twiBuffer = [];
+        this.twi.completeConnect(true);
+      },
+      writeByte: (value: number) => {
+        twiBuffer.push(value);
+        this.twi.completeWrite(true);
+      },
+      readByte: (ack: boolean) => {
+        this.twi.completeRead(0xFF);
+      }
+    };
 
     this.usart.onByteTransmit = (byte: number) => {
       this.onSerialOutput?.(String.fromCharCode(byte));

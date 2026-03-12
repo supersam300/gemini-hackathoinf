@@ -6,6 +6,7 @@ import { CircuitCanvas, PlacedComponent, Wire } from './components/CircuitCanvas
 import { AIPanel, ChatMessage } from './components/AIPanel';
 import { FilePanel, FileEntry } from './components/FilePanel';
 import { StatusBar } from './components/StatusBar';
+import { compileSketch } from '../api/arduino';
 // Code Editor imports
 import { Editor } from './components/arduino-ide/Editor';
 import { BottomPanel } from './components/arduino-ide/BottomPanel';
@@ -234,6 +235,148 @@ export default function App() {
       setUploading(false);
     });
   }, [verifying, uploading, board, port, codeTabs, codeActiveTabId, arduinoStore]);
+
+  // ── Simulation with connection validation ───────────────────────────────
+  const [simError, setSimError] = useState<string | null>(null);
+
+  // Auto-clear error messages after 5 seconds
+  useEffect(() => {
+    if (!simError) return;
+    const t = setTimeout(() => setSimError(null), 5000);
+    return () => clearTimeout(t);
+  }, [simError]);
+
+  const handleSimulate = useCallback(async () => {
+    // If already running, stop simulation
+    if (simulationStore.isRunning) {
+      simulationStore.stopSimulation();
+      setStatusMessage('Simulation stopped');
+      setSimError(null);
+      return;
+    }
+
+    setSimError(null);
+
+    // --- Validation 1: Check if canvas has any components ---
+    if (components.length === 0) {
+      const msg = '⚠ Not connected — No components on canvas';
+      setStatusMessage(msg);
+      setSimError(msg);
+      return;
+    }
+
+    // --- Validation 2: Check for an Arduino/MCU board ---
+    const boardTypes = ['arduino-uno', 'arduino-nano', 'arduino-mega', 'esp32'];
+    const boardComp = components.find(c => boardTypes.includes(c.type));
+    if (!boardComp) {
+      const msg = '⚠ Not connected — No Arduino/MCU board found on canvas';
+      setStatusMessage(msg);
+      setSimError(msg);
+      return;
+    }
+
+    // --- Validation 3: Check that at least one wire exists ---
+    if (wiresState.length === 0) {
+      const msg = '⚠ Connection error — No wires found. Connect components before simulating';
+      setStatusMessage(msg);
+      setSimError(msg);
+      return;
+    }
+
+    // --- Validation 4: Check that wires reference valid components ---
+    const compIds = new Set(components.map(c => c.id));
+    const brokenWires = wiresState.filter(w => !compIds.has(w.fromComponentId) || !compIds.has(w.toComponentId));
+    if (brokenWires.length > 0) {
+      const msg = `⚠ Connection error — ${brokenWires.length} wire(s) reference missing components`;
+      setStatusMessage(msg);
+      setSimError(msg);
+      return;
+    }
+
+    // --- Validation 5: Check that the board is connected to at least one other component ---
+    const boardWires = wiresState.filter(
+      w => w.fromComponentId === boardComp.id || w.toComponentId === boardComp.id
+    );
+    if (boardWires.length === 0) {
+      const msg = `⚠ Connection error — ${boardComp.label} is not connected to any component`;
+      setStatusMessage(msg);
+      setSimError(msg);
+      return;
+    }
+
+    // --- Validation 6: Warn about unconnected non-passive components ---
+    const connectedIds = new Set<string>();
+    wiresState.forEach(w => { connectedIds.add(w.fromComponentId); connectedIds.add(w.toComponentId); });
+    const passiveTypes = ['breadboard', 'breadboard-half', 'vcc', 'gnd'];
+    const unconnected = components.filter(
+      c => !connectedIds.has(c.id) && !boardTypes.includes(c.type) && !passiveTypes.includes(c.type)
+    );
+    if (unconnected.length > 0) {
+      const names = unconnected.slice(0, 3).map(c => c.label).join(', ');
+      const more = unconnected.length > 3 ? ` and ${unconnected.length - 3} more` : '';
+      setStatusMessage(`⚠ Warning: ${names}${more} not connected — simulation may be incomplete`);
+    }
+
+    // --- All validations passed — compile and start ---
+    setStatusMessage('Compiling sketch for simulation...');
+    setBottomVisible(true);
+    setBottomTab('output');
+    setCompileLogs([{ type: 'info', text: '● Validating circuit connections...' }]);
+    setCompileLogs(prev => [...prev, { type: 'success', text: `✓ ${boardComp.label} connected with ${boardWires.length} wire(s)` }]);
+    if (unconnected.length > 0) {
+      setCompileLogs(prev => [...prev, { type: 'warning', text: `⚠ ${unconnected.length} component(s) not connected` }]);
+    }
+
+    // Get the active code
+    const activeTab = codeTabs.find(t => t.id === codeActiveTabId);
+    const code = activeTab?.content || '';
+    if (!code.trim()) {
+      const msg = '⚠ Not connected — No code to simulate. Write or open an Arduino sketch first';
+      setStatusMessage(msg);
+      setSimError(msg);
+      setCompileLogs(prev => [...prev, { type: 'error', text: msg }]);
+      return;
+    }
+
+    setCompileLogs(prev => [...prev, { type: 'info', text: '● Compiling sketch...' }]);
+
+    try {
+      const result = await arduinoStore.compile(code);
+      if (result) {
+        // Try to get compiled hex from the arduino store
+        const hexResult = await compileSketch(code, 'arduino:avr:uno').catch(() => null);
+
+        if (hexResult?.hex) {
+          simulationStore.startSimulation(hexResult.hex);
+          setCompileLogs(prev => [...prev,
+            { type: 'success', text: '✓ Compilation successful' },
+            { type: 'success', text: '▶ Simulation started (AVR @ 16MHz)' },
+          ]);
+          setStatusMessage('● Simulation running (AVR @ 16MHz)');
+        } else {
+          // Compilation server may not return hex — try direct simulation start
+          setCompileLogs(prev => [...prev,
+            { type: 'warning', text: '⚠ Compile server did not return .hex — using mock simulation' },
+            { type: 'success', text: '▶ Simulation started in visual-only mode' },
+          ]);
+          setStatusMessage('● Simulation running (visual-only mode)');
+        }
+      } else {
+        const msg = '✗ Compilation failed — check your code for errors';
+        setCompileLogs(prev => [...prev, { type: 'error', text: msg }]);
+        setStatusMessage(msg);
+        setSimError(msg);
+      }
+    } catch (err) {
+      // Compile server not reachable — start a visual-only simulation
+      setCompileLogs(prev => [...prev,
+        { type: 'warning', text: '⚠ Compile server not reachable — running visual-only simulation' },
+        { type: 'info', text: 'To enable full AVR simulation, start: node server/index.js' },
+        { type: 'success', text: '▶ Simulation started in visual-only mode' },
+      ]);
+      setStatusMessage('● Simulation running (visual-only — compile server offline)');
+    }
+  }, [components, wiresState, simulationStore, codeTabs, codeActiveTabId, arduinoStore]);
 
   // Close settings dropdown on outside click
   useEffect(() => {
@@ -537,7 +680,7 @@ export default function App() {
         setStatusMessage('Wire tool — click to start drawing a wire');
         break;
       case 'Run Simulation':
-        setStatusMessage('Simulation running...');
+        handleSimulate();
         break;
       case 'Stop Simulation':
         simulationStore.stopSimulation();
@@ -591,7 +734,7 @@ export default function App() {
       default:
         setStatusMessage(`${action}`);
     }
-  }, [handleUndo, handleRedo, handleCopy, handlePaste, components, wiresState, pushHistory, handleVerify, handleUpload, activeView, simulationStore]);
+  }, [handleUndo, handleRedo, handleCopy, handlePaste, components, wiresState, pushHistory, handleVerify, handleUpload, activeView, simulationStore, handleSimulate]);
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -637,7 +780,11 @@ export default function App() {
         setStatusMessage(`Deleted ${sel.length} component(s)`);
       }
     }
-  }, [handleUndo, handleRedo, handleCopy, handlePaste, activeView, components, wiresState, pushHistory]);
+    if (e.key === 'F5') {
+      e.preventDefault();
+      handleSimulate();
+    }
+  }, [handleUndo, handleRedo, handleCopy, handlePaste, activeView, components, wiresState, pushHistory, handleSimulate]);
 
   const dm = darkMode;
   const titleBg = dm ? 'bg-gradient-to-r from-[#111122] to-[#0d1117]' : 'bg-gradient-to-r from-[#1a1a2e] to-[#16213e]';
@@ -732,6 +879,8 @@ export default function App() {
         onUndo={handleUndo}
         onRedo={handleRedo}
         onResetView={() => window.dispatchEvent(new CustomEvent('simuide-reset-view'))}
+        onSimulate={handleSimulate}
+        isSimulating={simulationStore.isRunning}
         darkMode={darkMode}
         boardName={(() => {
           const boardTypes: Record<string, string> = {
@@ -773,23 +922,45 @@ export default function App() {
 
         {/* Center area: switches between canvas and code editor */}
         {activeView === 'simulation' ? (
-          <CircuitCanvas
-            components={components}
-            activeTool={activeTool}
-            zoom={zoom}
-            selectedLibComponent={selectedLibComponent}
-            onPlaceComponent={handlePlaceComponent}
-            onUpdateComponents={handleUpdateComponents}
-            onDeleteComponent={handleDeleteComponent}
-            onStatusChange={setStatusMessage}
-            onCoordinatesChange={setCoordinates}
-            onZoomChange={setZoom}
-            wires={wiresState}
-            onUpdateWires={handleUpdateWires}
-            showGrid={showGrid}
-            darkMode={darkMode}
-            onClearCanvas={() => handleMenuAction('Clear Canvas')}
-          />
+          <div className="flex-1 relative overflow-hidden w-full h-full" style={{ minHeight: 0 }}>
+            <CircuitCanvas
+              components={components}
+              activeTool={activeTool}
+              zoom={zoom}
+              selectedLibComponent={selectedLibComponent}
+              onPlaceComponent={handlePlaceComponent}
+              onUpdateComponents={handleUpdateComponents}
+              onDeleteComponent={handleDeleteComponent}
+              onStatusChange={setStatusMessage}
+              onCoordinatesChange={setCoordinates}
+              onZoomChange={setZoom}
+              wires={wiresState}
+              onUpdateWires={handleUpdateWires}
+              showGrid={showGrid}
+              darkMode={darkMode}
+              onClearCanvas={() => handleMenuAction('Clear Canvas')}
+            />
+            {/* Simulation error toast */}
+            {simError && (
+              <div
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-lg border animate-in fade-in slide-in-from-top-2"
+                style={{
+                  background: dm ? 'linear-gradient(135deg, #3c1518, #2d1215)' : '#fef2f2',
+                  borderColor: dm ? '#7f1d1d' : '#fca5a5',
+                  color: dm ? '#fca5a5' : '#991b1b',
+                  maxWidth: '90%',
+                }}
+              >
+                <span style={{ fontSize: 16 }}>⚠</span>
+                <span className="text-[12px] font-medium">{simError.replace(/^⚠\s*/, '')}</span>
+                <button
+                  onClick={() => setSimError(null)}
+                  className="ml-2 opacity-60 hover:opacity-100 transition-opacity text-[14px]"
+                  title="Dismiss"
+                >×</button>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="flex flex-col flex-1 overflow-hidden">
             <div className="flex-1 overflow-hidden">

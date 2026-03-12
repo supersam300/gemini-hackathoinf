@@ -12,6 +12,8 @@ interface MainToolbarProps {
   onUndo: () => void;
   onRedo: () => void;
   onResetView: () => void;
+  onSimulate?: () => void;
+  isSimulating?: boolean;
   darkMode?: boolean;
   boardName?: string;
 }
@@ -64,7 +66,7 @@ function Separator({ darkMode = false }: { darkMode?: boolean }) {
   return <div className={`w-[1px] h-[18px] mx-1.5 shrink-0 ${darkMode ? 'bg-[#555]' : 'bg-[#d0d0d0]'}`} />;
 }
 
-export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUndo, onRedo, onResetView, darkMode, boardName }: MainToolbarProps) {
+export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUndo, onRedo, onResetView, onSimulate, isSimulating, darkMode, boardName }: MainToolbarProps) {
   const dm = !!darkMode;
   const zoomIn = () => onZoomChange(Math.min(zoom + 10, 300));
   const zoomOut = () => onZoomChange(Math.max(zoom - 10, 25));
@@ -116,10 +118,22 @@ export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUn
         <span className="text-[12px] font-medium" style={{ color: dm ? '#e0a060' : '#b85c00' }}>Debug</span>
       </ToolButton>
 
-      <ToolButton title="Run Simulation (F5)" onClick={() => {}} darkMode={dm}>
-        <Play size={14} style={{ color: dm ? '#73C991' : '#2e7d32' }} />
-        <span className="text-[12px] font-medium" style={{ color: dm ? '#73C991' : '#2e7d32' }}>Simulate</span>
+      <ToolButton title={isSimulating ? "Stop Simulation (F5)" : "Run Simulation (F5)"} onClick={() => onSimulate?.()} darkMode={dm}>
+        {isSimulating ? (
+          <>
+            <span style={{ color: dm ? '#f87171' : '#c62828', fontSize: 14 }}>⏹</span>
+            <span className="text-[12px] font-medium" style={{ color: dm ? '#f87171' : '#c62828' }}>Stop</span>
+          </>
+        ) : (
+          <>
+            <Play size={14} style={{ color: dm ? '#73C991' : '#2e7d32' }} />
+            <span className="text-[12px] font-medium" style={{ color: dm ? '#73C991' : '#2e7d32' }}>Simulate</span>
+          </>
+        )}
       </ToolButton>
+      {isSimulating && (
+        <span className="text-[10px] text-emerald-400 animate-pulse ml-0.5 hidden lg:inline">● Running</span>
+      )}
 
       <Separator darkMode={dm} />
 

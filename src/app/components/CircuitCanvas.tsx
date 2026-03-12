@@ -943,9 +943,33 @@ export function CircuitCanvas({
              }
           }
 
-          if (comp?.type.startsWith('led')) el.value = value;
+          if (comp?.type.startsWith('led') && comp?.type !== 'led-bar-graph') el.value = value;
           else if (comp?.type === 'buzzer') el.hasSignal = value;
           else if (comp?.type === 'servo') el.angle = value ? 180 : 0;
+          else if (comp?.type === 'rgb-led') {
+             if (!comp.attrs) comp.attrs = {};
+             comp.attrs[p.pinName] = value ? '1' : '0';
+             if (p.pinName === 'R') el.ledRed = value ? 255 : 0;
+             if (p.pinName === 'G') el.ledGreen = value ? 255 : 0;
+             if (p.pinName === 'B') el.ledBlue = value ? 255 : 0;
+          }
+          else if (comp?.type === '7seg') {
+             if (!comp.attrs) comp.attrs = {};
+             const attrs = comp.attrs;
+             attrs[p.pinName] = value ? '1' : '0';
+             const segments = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'];
+             el.values = segments.map(seg => attrs[seg] === '1' ? 1 : 0);
+          }
+          else if (comp?.type === 'led-bar-graph') {
+             if (!comp.attrs) comp.attrs = {};
+             const attrs = comp.attrs;
+             attrs[p.pinName] = value ? '1' : '0';
+             el.values = Array.from({length: 10}, (_, i) => {
+                 const pName1 = String(i + 1);
+                 const pName2 = 'A' + (i + 1);
+                 return (attrs[pName1] === '1' || attrs[pName2] === '1') ? 1 : 0;
+             });
+          }
           else if (el.setPinState) el.setPinState(p.pinName, value);
 
           // Keypad scanning logic: if row is high, check if key is pressed to set col high
