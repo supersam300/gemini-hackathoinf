@@ -3,6 +3,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { useDiagramStore } from "../../store/diagramStore";
 import { useSimulationStore } from "../../store/simulationStore";
 import { COMPONENTS } from "../../constants/components";
+import { getPinKey } from "../../utils/arduinoPins";
 import "@wokwi/elements";
 import "../styles/ComponentNode.css";
 
@@ -92,12 +93,15 @@ interface WokwiElementProps {
   tag: string;
   elementRef: React.MutableRefObject<HTMLElement | null>;
   componentId: string;
+  nodeId: string;
 }
 
-function WokwiElement({ tag, elementRef, componentId }: WokwiElementProps) {
+function WokwiElement({ tag, elementRef, componentId, nodeId }: WokwiElementProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pinStates = useSimulationStore((s) => s.pinStates);
   const isRunning = useSimulationStore((s) => s.isRunning);
+  const setPin = useSimulationStore((s) => s.setPin);
+  const { nodes, edges } = useDiagramStore();
 
   useEffect(() => {
     if (containerRef.current && !containerRef.current.querySelector(tag)) {
@@ -108,21 +112,109 @@ function WokwiElement({ tag, elementRef, componentId }: WokwiElementProps) {
     }
   }, [tag, elementRef]);
 
-  // Wire LED brightness to simulation pin states
+  // Wire inputs/outputs to simulation
   useEffect(() => {
     const el = elementRef.current as any;
-    if (!el || componentId !== "led") return;
+    if (!el) return;
 
-    if (isRunning) {
-      // Check if any HIGH pin is connected — for demo we check common patterns
-      const anyHigh = Object.values(pinStates).some(Boolean);
-      el.value = anyHigh;
-      el.brightness = anyHigh ? 1.0 : 0;
-    } else {
-      el.value = false;
-      el.brightness = 0;
+    // --- Attributes Setup ---
+    if (componentId === "led-green") el.setAttribute("color", "green");
+    if (componentId === "led-blue") el.setAttribute("color", "blue");
+    if (componentId === "led-yellow") el.setAttribute("color", "yellow");
+    if (componentId === "led") el.setAttribute("color", "red");
+
+    // --- Generic Pin Helpers ---
+    const isPinHigh = (targetHandleId?: string) => {
+      const incomingEdges = edges.filter(e => e.target === nodeId && (!targetHandleId || e.targetHandle === targetHandleId));
+      return incomingEdges.some(e => {
+        const sourceNode = nodes.find(n => n.id === e.source);
+        if (sourceNode?.data.componentId.startsWith("arduino") && e.sourceHandle) {
+          const pinKey = getPinKey(e.sourceHandle);
+          return pinKey && pinStates[pinKey];
+        }
+        return false;
+      });
+    };
+
+    const setArduinoPin = (sourceHandleId: string | null, value: boolean | number) => {
+      const outgoingEdges = edges.filter(e => e.source === nodeId && (!sourceHandleId || e.sourceHandle === sourceHandleId));
+      outgoingEdges.forEach(e => {
+        const targetNode = nodes.find(n => n.id === e.target);
+        if (targetNode?.data.componentId.startsWith("arduino") && e.targetHandle) {
+          if (typeof value === "boolean") {
+            const mapping = getPinKey(e.targetHandle);
+            if (mapping) {
+              const port = mapping[0];
+              const pin = parseInt(mapping.slice(1));
+              useSimulationStore.getState().setPin(port, pin, value);
+            }
+          } else if (e.targetHandle.startsWith("A")) {
+             const channel = parseInt(e.targetHandle.slice(1));
+             // Fallback for missing type
+             const sim = useSimulationStore.getState().simulator as any;
+             if (sim?.setAnalogPin) {
+                sim.setAnalogPin(channel, value);
+             }
+          }
+        }
+      });
+    };
+
+    // --- Digital Outputs (LEDs, Buzzer, Relay) ---
+    if (componentId.startsWith("led") && componentId !== "led-bar-graph") {
+      const high = isRunning && isPinHigh();
+      el.value = high;
+      el.brightness = high ? 1.0 : 0;
     }
-  }, [pinStates, isRunning, elementRef, componentId]);
+    
+    if (componentId === "buzzer" || componentId === "relay") {
+      el.value = isRunning && isPinHigh();
+    }
+
+    // --- Servo ---
+    if (componentId === "servo") {
+      const high = isPinHigh();
+      // Basic rotation mock since true PWM requires complex cycle tracking
+      el.angle = high ? 180 : 0;
+    }
+
+    // --- Digital Inputs (Buttons, Switches, Motion) ---
+    if (["pushbutton", "slide-switch", "dip-switch-8", "pir", "flame-sensor"].includes(componentId)) {
+      const handleDown = () => setArduinoPin(null, true);
+      const handleUp = () => setArduinoPin(null, false);
+      const handleChange = (e: any) => {
+        // dip-switch or slide-switch might provide e.target.value or similar
+        // We do a generic true toggle or read value
+        setArduinoPin(null, !!e.target?.value || !!e.detail);
+      };
+
+      el.addEventListener("button-press", handleDown);
+      el.addEventListener("button-release", handleUp);
+      el.addEventListener("change", handleChange);
+      el.addEventListener("input", handleChange);
+      return () => {
+        el.removeEventListener("button-press", handleDown);
+        el.removeEventListener("button-release", handleUp);
+        el.removeEventListener("change", handleChange);
+        el.removeEventListener("input", handleChange);
+      };
+    }
+
+    // --- Analog Inputs (Potentiometer, Sensors) ---
+    if (["potentiometer", "ntc-sensor", "gas-sensor", "photoresistor-sensor", "sound-sensor", "analog-joystick"].includes(componentId)) {
+      const handleInput = (e: any) => {
+        // e.target.value is usually voltage or raw 0-1023
+        setArduinoPin(null, e.target.value || 0);
+      };
+      el.addEventListener("input", handleInput);
+      el.addEventListener("change", handleInput);
+      return () => {
+        el.removeEventListener("input", handleInput);
+        el.removeEventListener("change", handleInput);
+      };
+    }
+
+  }, [pinStates, isRunning, elementRef, componentId, edges, nodes, nodeId]);
 
   return <div ref={containerRef} className="wokwi-element-wrapper" />;
 }
@@ -182,7 +274,7 @@ export default function ComponentNode(props: NodeProps<any>) {
       {/* Render either Wokwi element, custom SVG, or fallback emoji */}
       <div className="component-content">
         {hasWokwi ? (
-          <WokwiElement tag={componentDef.wokwiTag!} elementRef={wokwiRef} componentId={componentDef.id} />
+          <WokwiElement tag={componentDef.wokwiTag!} elementRef={wokwiRef} componentId={componentDef.id} nodeId={id} />
         ) : CustomSvg ? (
           <div className="custom-svg-wrapper"><CustomSvg /></div>
         ) : (

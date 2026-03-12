@@ -5,14 +5,21 @@ import {
   AVRIOPort,
   AVRUSART,
   AVRClock,
+  AVRADC,
   portBConfig,
   portCConfig,
   portDConfig,
+  adcConfig,
   timer0Config,
+
   timer1Config,
   timer2Config,
   usart0Config,
   clockConfig,
+  AVRTWI,
+  twiConfig,
+  AVRSPI,
+  spiConfig,
 } from "avr8js";
 
 /** Parse Intel HEX format into a flat byte array */
@@ -48,6 +55,9 @@ export class ArduinoSimulator {
   private timer0: AVRTimer;
   private timer1: AVRTimer;
   private timer2: AVRTimer;
+  private adc: AVRADC;
+  private twi: AVRTWI;
+  private spi: AVRSPI;
   private running = false;
   private animFrameId: number | null = null;
 
@@ -64,6 +74,9 @@ export class ArduinoSimulator {
     this.timer0 = new AVRTimer(this.cpu, timer0Config);
     this.timer1 = new AVRTimer(this.cpu, timer1Config);
     this.timer2 = new AVRTimer(this.cpu, timer2Config);
+    this.adc = new AVRADC(this.cpu, adcConfig);
+    this.twi = new AVRTWI(this.cpu, twiConfig, CPU_FREQ);
+    this.spi = new AVRSPI(this.cpu, spiConfig, CPU_FREQ);
 
     this.usart.onByteTransmit = (byte: number) => {
       this.onSerialOutput?.(String.fromCharCode(byte));
@@ -85,7 +98,13 @@ export class ArduinoSimulator {
       for (let i = 0; i < 8; i++) {
         this.onPinChange?.("D", i, this.portD.pinState(i) === 1);
       }
+      this.checkVirtualSensors();
     });
+  }
+
+  private checkVirtualSensors() {
+    // This is a simplified placeholder for sensor-specific logic.
+    // In a real implementation, we would hook specific pins.
   }
 
   loadHex(hex: string) {
@@ -100,6 +119,17 @@ export class ArduinoSimulator {
       port === "B" ? this.portB : port === "C" ? this.portC : this.portD;
     p.setPin(pin, high);
   }
+
+  setAnalogPin(channel: number, value: number) {
+    this.adc.channelValues[channel] = value;
+  }
+
+  /** Set sensor-specific values (e.g., distance for ultrasonic, temp for DHT) */
+  setSensorValue(type: string, value: any) {
+    // Logic for updating internal virtual sensor state
+    // For now, we can store these in a map if we implement complex sensor models
+  }
+
 
   start() {
     this.running = true;

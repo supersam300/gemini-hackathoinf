@@ -1,4 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useSimulationStore } from '../../store/simulationStore';
+import { UNO_PIN_MAP } from '../../utils/arduinoPins';
 
 // Mapping from internal component type → wokwi custom-element tag + approximate render size
 const WOKWI_MAP: Record<string, { tag: string; width: number; height: number; attrs?: Record<string, string> }> = {
@@ -417,12 +419,14 @@ function CanvasComponent({
   onClick,
   onMouseDown,
   onContextMenu,
+  wokwiRefs,
 }: {
   comp: PlacedComponent;
   activeTool: string;
   onClick: (id: string) => void;
   onMouseDown: (id: string, e: React.MouseEvent) => void;
   onContextMenu: (id: string, e: React.MouseEvent) => void;
+  wokwiRefs: React.MutableRefObject<Map<string, any>>;
 }) {
   // When wire tool is active, let all clicks pass through to canvas for pin detection
   const passThrough = activeTool === 'wire';
@@ -435,6 +439,13 @@ function CanvasComponent({
       filter: comp.selected ? 'drop-shadow(0 0 4px rgba(0,120,215,0.6))' : undefined,
       pointerEvents: passThrough ? 'none' as const : undefined,
     },
+    ref: (el: any) => {
+      if (el) {
+        // Since foreignObject contains the actual custom element
+        const customEl = el.querySelector(wokwiRefs.current.get(comp.id)?.tagName || '*');
+        if (customEl) wokwiRefs.current.set(comp.id, customEl);
+      }
+    }
   };
 
   // Check if there's a wokwi element for this type
@@ -446,7 +457,13 @@ function CanvasComponent({
         <foreignObject width={wokwi.width} height={wokwi.height} style={{ overflow: 'visible' }}>
           {(() => {
             const Tag = wokwi.tag as any;
-            return <Tag {...attrs} />;
+            return <Tag 
+              {...attrs} 
+              id={`wokwi-${comp.id}`}
+              ref={(el: any) => {
+                if (el) wokwiRefs.current.set(comp.id, el);
+              }}
+            />;
           })()}
         </foreignObject>
         {/* Label below the component */}
@@ -601,6 +618,7 @@ export function CircuitCanvas({
   const dragStartRef = useRef<{ compX: number; compY: number; mouseX: number; mouseY: number } | null>(null);
   const didDragRef = useRef(false);
 
+
   // Scrollbar state
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
   const scrollDragRef = useRef<{ axis: 'h' | 'v'; startMouse: number; startPan: number } | null>(null);
@@ -694,6 +712,272 @@ export function CircuitCanvas({
     if (!pin) return null;
     return { x: comp.x + pin.x, y: comp.y + pin.y };
   }, [localComponents]);
+
+  // Combined Simulation Bridge
+  const { isRunning, simulator } = useSimulationStore();
+  const wokwiRefs = useRef<Map<string, any>>(new Map());
+
+  useEffect(() => {
+    if (!isRunning || !simulator) return;
+
+    // 1. Build Netlist (Transitive)
+    const netlist = new Map<string, { componentId: string; pinName: string }[]>();
+    const findConnected = (startCompId: string, startPinName: string) => {
+      const visited = new Set<string>();
+      const queue: { compId: string; pinName: string }[] = [{ compId: startCompId, pinName: startPinName }];
+      const results: { componentId: string; pinName: string }[] = [];
+      while (queue.length > 0) {
+        const { compId, pinName } = queue.shift()!;
+        const key = `${compId}:${pinName}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        wires.forEach(wire => {
+          let o: { compId: string; pinName: string } | null = null;
+          if (wire.fromComponentId === compId && wire.fromPinName === pinName) o = { compId: wire.toComponentId, pinName: wire.toPinName };
+          else if (wire.toComponentId === compId && wire.toPinName === pinName) o = { compId: wire.fromComponentId, pinName: wire.fromPinName };
+          if (o) {
+            const oc = localComponents.find(c => c.id === o!.compId);
+            if (!oc) return;
+            if (oc.type.startsWith('arduino-')) return;
+            results.push({ componentId: o!.compId, pinName: o!.pinName });
+            if (['resistor', 'capacitor'].includes(oc.type) || oc.type.startsWith('breadboard')) {
+              getAllPins().filter(p => p.componentId === o!.compId && p.pinName !== o!.pinName).forEach(p => queue.push({ compId: p.componentId, pinName: p.pinName }));
+            }
+          }
+        });
+      }
+      return results;
+    };
+
+    Object.keys(UNO_PIN_MAP).forEach(p => {
+      const ac = localComponents.find(c => c.type.startsWith('arduino-'));
+      if (ac) netlist.set(p, findConnected(ac.id, p));
+    });
+
+    // 1b. Permanent Drivers (VCC/GND)
+    const drivePower = () => {
+      localComponents.forEach(c => {
+        const el = wokwiRefs.current.get(c.id);
+        if (!el) return;
+        if (c.type === 'vcc') findConnected(c.id, 'VCC').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, true));
+        if (c.type === 'gnd') findConnected(c.id, 'GND').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, false));
+        // Also drive the "VCC" and "GND" pins of the main boards if connected
+        if (c.type.startsWith('arduino-') || c.type === 'esp32') {
+           findConnected(c.id, '5V').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, true));
+           findConnected(c.id, '3.3V').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, true));
+           findConnected(c.id, 'GND').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, false));
+        }
+      });
+    };
+    drivePower();
+
+    // 2. Setup Input Handlers
+    const listeners: { el: any; ev: string; handler: any }[] = [];
+    localComponents.forEach(comp => {
+      const el = wokwiRefs.current.get(comp.id);
+      if (!el) return;
+
+      // Create a map of ALL wires connected to this component's pins
+      const pinToArduino = new Map<string, { port: string; pin: number; name: string }>();
+      wires.forEach(w => {
+        let compPin: string | null = null;
+        let arduinoPinName: string | null = null;
+        if (w.fromComponentId === comp.id) {
+          compPin = w.fromPinName;
+          if (w.toComponentId.startsWith('arduino')) arduinoPinName = w.toPinName;
+        } else if (w.toComponentId === comp.id) {
+          compPin = w.toPinName;
+          if (w.fromComponentId.startsWith('arduino')) arduinoPinName = w.fromPinName;
+        }
+        if (compPin && arduinoPinName) {
+          const m = UNO_PIN_MAP[arduinoPinName];
+          if (m) pinToArduino.set(compPin, { ...m, name: arduinoPinName });
+        }
+      });
+
+      if (comp.type === 'pushbutton') {
+        const h = (e: any) => {
+          const p = pinToArduino.get('1') || pinToArduino.get('2') || pinToArduino.values().next().value;
+          if (p) simulator.setPin(p.port, p.pin, e.detail);
+        };
+        el.addEventListener('button-press', h);
+        listeners.push({ el, ev: 'button-press', handler: h });
+      }
+
+      if (comp.type === 'slide-switch') {
+        const h = (e: any) => {
+          const p = pinToArduino.get('1') || pinToArduino.get('2') || pinToArduino.get('3');
+          if (p) simulator.setPin(p.port, p.pin, e.target.value === '1');
+        };
+        el.addEventListener('input', h);
+        listeners.push({ el, ev: 'input', handler: h });
+      }
+
+      if (['potentiometer', 'ntc-sensor', 'photoresistor-sensor'].includes(comp.type)) {
+        const h = (e: any) => {
+          const p = pinToArduino.get('SIG') || pinToArduino.get('2') || Array.from(pinToArduino.values()).find(px => px.name.startsWith('A'));
+          if (p) {
+            const val = Math.floor((e.target.value / 100) * 1023);
+            simulator.setAnalogPin(parseInt(p.name.substring(1)), val);
+          }
+        };
+        el.addEventListener('input', h);
+        listeners.push({ el, ev: 'input', handler: h });
+      }
+
+      if (comp.type === 'analog-joystick') {
+        const h = (e: any) => {
+          const { x, y, button } = e.detail;
+          const px = pinToArduino.get('HORZ');
+          const py = pinToArduino.get('VERT');
+          const pb = pinToArduino.get('SEL');
+          if (px && px.name.startsWith('A')) simulator.setAnalogPin(parseInt(px.name.substring(1)), Math.floor((x / 100) * 1023));
+          if (py && py.name.startsWith('A')) simulator.setAnalogPin(parseInt(py.name.substring(1)), Math.floor((y / 100) * 1023));
+          if (pb) simulator.setPin(pb.port, pb.pin, button);
+        };
+        el.addEventListener('input', h);
+        listeners.push({ el, ev: 'input', handler: h });
+      }
+
+      if (comp.type === 'rotary-encoder') {
+        const h = (e: any) => {
+          const { clk, dt, sw } = e.detail;
+          const pClk = pinToArduino.get('CLK');
+          const pDt = pinToArduino.get('DT');
+          const pSw = pinToArduino.get('SW');
+          if (pClk && clk !== undefined) simulator.setPin(pClk.port, pClk.pin, clk);
+          if (pDt && dt !== undefined) simulator.setPin(pDt.port, pDt.pin, dt);
+          if (pSw && sw !== undefined) simulator.setPin(pSw.port, pSw.pin, sw);
+        };
+        el.addEventListener('change', h);
+        listeners.push({ el, ev: 'change', handler: h });
+      }
+
+      if (comp.type === 'dip-switch-8') {
+        const h = (e: any) => {
+          const state = e.target.value;
+          for (let i = 1; i <= 8; i++) {
+            const p = pinToArduino.get(String(i));
+            if (p) simulator.setPin(p.port, p.pin, state[i - 1] === '1');
+          }
+        };
+        el.addEventListener('input', h);
+        listeners.push({ el, ev: 'input', handler: h });
+      }
+
+      if (comp.type === 'membrane-keypad') {
+        const h = (e: any) => {
+          const { row, col, pressed } = e.detail;
+          if (comp.attrs) comp.attrs[`key_${row}_${col}`] = pressed ? '1' : '0';
+        };
+        el.addEventListener('key-press', h);
+        listeners.push({ el, ev: 'key-press', handler: h });
+      }
+
+      if (comp.type === 'pir') {
+        const h = (e: any) => {
+          const p = pinToArduino.get('OUT');
+          if (p) simulator.setPin(p.port, p.pin, e.detail);
+        };
+        el.addEventListener('motion', h);
+        listeners.push({ el, ev: 'motion', handler: h });
+      }
+
+      if (comp.type === 'dht22') {
+        const h = (e: any) => {
+          if (comp.attrs) {
+            comp.attrs.temp = String(e.detail.temp);
+            comp.attrs.hum = String(e.detail.hum);
+          }
+        };
+        el.addEventListener('dht-change', h);
+        listeners.push({ el, ev: 'dht-change', handler: h });
+      }
+
+      // 2b. Generic Attribute Sync (ensure UI attributes like 'distance' or 'color' are on element)
+      if (comp.attrs) {
+        Object.entries(comp.attrs).forEach(([attr, val]) => {
+          if (el.getAttribute(attr) !== val) el.setAttribute(attr, val);
+        });
+      }
+    });
+
+    // 3. Setup Pin Listening
+    const original = simulator.onPinChange;
+    simulator.onPinChange = (port, pin, value) => {
+      if (original) original(port, pin, value);
+      const aPin = Object.entries(UNO_PIN_MAP).find(([_,v])=>v.port===port && v.pin===pin)?.[0];
+      if (aPin) {
+        (netlist.get(aPin) || []).forEach(p => {
+          const el = wokwiRefs.current.get(p.componentId);
+          if (!el) return;
+          const comp = localComponents.find(c => c.id === p.componentId);
+
+          // HC-SR04 Logic: Trigger -> Echo
+          if (comp?.type === 'hcsr04' && p.pinName === 'TRIG' && value === true) {
+             // Handle HC-SR04 trigger pulse
+             const distance = parseFloat(comp.attrs?.distance || '100');
+             const echoTimeMs = (distance * 58) / 1000; // Simplified calculation
+             
+             // Find ECHO pin connection back to Arduino
+             const echoPin = getAllPins().find(pn => pn.componentId === p.componentId && pn.pinName === 'ECHO');
+             if (echoPin) {
+               // Find which Arduino pin is connected to this ECHO pin
+               const wire = wires.find(w => 
+                 (w.fromComponentId === echoPin.componentId && w.fromPinName === echoPin.pinName) ||
+                 (w.toComponentId === echoPin.componentId && w.toPinName === echoPin.pinName)
+               );
+               if (wire) {
+                 const aSide = wire.fromComponentId.startsWith('arduino') ? 'from' : 'to';
+                 const aPinName = aSide === 'from' ? wire.fromPinName : wire.toPinName;
+                 const m = UNO_PIN_MAP[aPinName];
+                 if (m) {
+                   setTimeout(() => {
+                     simulator.setPin(m.port, m.pin, true);
+                     setTimeout(() => {
+                       simulator.setPin(m.port, m.pin, false);
+                     }, echoTimeMs);
+                   }, 1); // Small delay after trigger
+                 }
+               }
+             }
+          }
+
+          if (comp?.type.startsWith('led')) el.value = value;
+          else if (comp?.type === 'buzzer') el.hasSignal = value;
+          else if (comp?.type === 'servo') el.angle = value ? 180 : 0;
+          else if (el.setPinState) el.setPinState(p.pinName, value);
+
+          // Keypad scanning logic: if row is high, check if key is pressed to set col high
+          if (comp?.type === 'membrane-keypad' && p.pinName.startsWith('R')) {
+            const rowIdx = parseInt(p.pinName.substring(1)) - 1;
+            // Find columns for this keypad
+            const cols = [1,2,3,4]; // 4x4 keypad
+            cols.forEach(cIdx => {
+              if (comp.attrs?.[`key_${rowIdx}_${cIdx-1}`] === '1') {
+                const colPin = getAllPins().find(pn => pn.componentId === comp.id && pn.pinName === `C${cIdx}`);
+                if (colPin) {
+                   // Drive the connected Arduino pin for this column
+                   const wire = wires.find(w => (w.fromComponentId === colPin.componentId && w.fromPinName === colPin.pinName) || (w.toComponentId === colPin.componentId && w.toPinName === colPin.pinName));
+                   if (wire) {
+                     const aSide = wire.fromComponentId.startsWith('arduino') ? 'from' : 'to';
+                     const aPinName = aSide === 'from' ? wire.fromPinName : wire.toPinName;
+                     const targetM = UNO_PIN_MAP[aPinName];
+                     if (targetM) simulator.setPin(targetM.port, targetM.pin, value);
+                   }
+                }
+              }
+            });
+          }
+        });
+      }
+    };
+
+    return () => {
+      simulator.onPinChange = original;
+      listeners.forEach(l => l.el.removeEventListener(l.ev, l.handler));
+    };
+  }, [isRunning, simulator, wires, localComponents, getAllPins]);
 
   // Scrollbar drag handling
   useEffect(() => {
@@ -1195,7 +1479,7 @@ export function CircuitCanvas({
           <g transform={`translate(${pan.x}, ${pan.y}) scale(${scale})`}>
             {/* Components (rendered first so wires appear on top) */}
             {localComponents.map(comp => (
-              <CanvasComponent key={comp.id} comp={comp} activeTool={activeTool} onClick={handleComponentClick} onMouseDown={handleComponentMouseDown} onContextMenu={handleComponentContextMenu} />
+              <CanvasComponent key={comp.id} comp={comp} activeTool={activeTool} onClick={handleComponentClick} onMouseDown={handleComponentMouseDown} onContextMenu={handleComponentContextMenu} wokwiRefs={wokwiRefs} />
             ))}
 
             {/* Wires — rendered ABOVE components so they are always visible */}

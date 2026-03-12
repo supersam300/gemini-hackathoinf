@@ -5,16 +5,15 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 async function connectDB() {
     const uri = process.env.MONGODB_URI;
     if (!uri) {
-        console.error("❌ MONGODB_URI is not set. Create a server/.env file with your Atlas connection string.");
-        process.exit(1);
+        console.warn("⚠️ MONGODB_URI is not set. Database features will be unavailable.");
+        return;
     }
 
     try {
         await mongoose.connect(uri);
         console.log("✅ Connected to MongoDB Atlas");
     } catch (err) {
-        console.error("❌ MongoDB connection failed:", err.message);
-        process.exit(1);
+        console.warn("⚠️ MongoDB connection failed. Database features will be unavailable. Error:", err.message);
     }
 }
 

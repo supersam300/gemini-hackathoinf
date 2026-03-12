@@ -32,6 +32,20 @@
   border-radius: 3px;
 }
 
-.react-flow__edge-path {
-  pointer-events: all;
+.connection-edge.is-flowing {
+  stroke: #22d3ee;
+  stroke-width: 3px;
+  stroke-dasharray: 5;
+  animation: flow 1s linear infinite;
+  filter: drop-shadow(0 0 4px #22d3ee);
 }
+
+@keyframes flow {
+  from {
+    stroke-dashoffset: 20;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+

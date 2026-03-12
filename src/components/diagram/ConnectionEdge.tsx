@@ -1,5 +1,8 @@
+import { useCallback } from "react";
 import { BaseEdge, getSmoothStepPath, type EdgeProps } from "@xyflow/react";
 import { useDiagramStore } from "../../store/diagramStore";
+import { useSimulationStore } from "../../store/simulationStore";
+import { getPinKey } from "../../utils/arduinoPins";
 import "../styles/ConnectionEdge.css";
 
 export default function ConnectionEdge(props: EdgeProps<any>) {
@@ -16,6 +19,20 @@ export default function ConnectionEdge(props: EdgeProps<any>) {
   } = props;
 
   const { selectEdge } = useDiagramStore();
+  const { pinStates, isRunning } = useSimulationStore();
+  const { nodes } = useDiagramStore();
+
+  const isFlowing = useCallback(() => {
+    if (!isRunning || !props.sourceHandleId) return false;
+    const sourceNode = nodes.find(n => n.id === props.source);
+    if (sourceNode?.data.componentId === "arduino-uno") {
+      const pinKey = getPinKey(props.sourceHandleId);
+      return pinKey ? !!pinStates[pinKey] : false;
+    }
+    return false;
+  }, [isRunning, props.source, props.sourceHandleId, nodes, pinStates]);
+
+  const active = isFlowing();
 
   const [edgePath] = getSmoothStepPath({
     sourceX,
@@ -35,7 +52,7 @@ export default function ConnectionEdge(props: EdgeProps<any>) {
       <BaseEdge
         id={id}
         path={edgePath}
-        className={`connection-edge ${selected ? "selected" : ""}`}
+        className={`connection-edge ${selected ? "selected" : ""} ${active ? "is-flowing" : ""}`}
       />
       {data?.label && (
         <text
