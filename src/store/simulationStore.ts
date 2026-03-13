@@ -5,6 +5,7 @@ interface SimulationState {
   isRunning: boolean;
   serialOutput: string;
   pinStates: Record<string, boolean>;
+  i2cData: { address: number; data: number[]; timestamp: number } | null;
   simulator: ArduinoSimulator | null;
   startSimulation: (hex: string) => void;
   stopSimulation: () => void;
@@ -16,6 +17,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   isRunning: false,
   serialOutput: "",
   pinStates: {},
+  i2cData: null,
   simulator: null,
 
   startSimulation: (hex: string) => {
@@ -34,9 +36,17 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       }));
     };
 
-    sim.loadHex(hex);
-    sim.start();
-    set({ simulator: sim, isRunning: true, serialOutput: "", pinStates: {} });
+    sim.onI2CWrite = (address, data) => {
+      set({ i2cData: { address, data, timestamp: Date.now() } });
+    };
+
+    // Only load and run AVR CPU if hex is provided (MCU mode)
+    if (hex && hex.trim()) {
+      sim.loadHex(hex);
+      sim.start();
+    }
+    // Always mark as running so the CircuitCanvas simulation bridge activates
+    set({ simulator: sim, isRunning: true, serialOutput: "", pinStates: {}, i2cData: null });
   },
 
   stopSimulation: () => {

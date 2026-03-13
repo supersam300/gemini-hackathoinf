@@ -265,11 +265,15 @@ export default function App() {
       return;
     }
 
-    // --- Validation 2: Check for an Arduino/MCU board ---
+    // --- Validation 2: Check for a power source (board OR battery/vcc) ---
     const boardTypes = ['arduino-uno', 'arduino-nano', 'arduino-mega', 'esp32'];
+    const powerSourceTypes = ['battery', 'vcc'];
     const boardComp = components.find(c => boardTypes.includes(c.type));
-    if (!boardComp) {
-      const msg = '⚠ Not connected — No Arduino/MCU board found on canvas';
+    const powerComp = components.find(c => powerSourceTypes.includes(c.type));
+    const hasPowerSource = !!boardComp || !!powerComp;
+
+    if (!hasPowerSource) {
+      const msg = '⚠ Not connected — No power source found. Add an Arduino board, Battery, or VCC';
       setStatusMessage(msg);
       setSimError(msg);
       return;
@@ -293,21 +297,26 @@ export default function App() {
       return;
     }
 
-    // --- Validation 5: Check that the board is connected to at least one other component ---
-    const boardWires = wiresState.filter(
-      w => w.fromComponentId === boardComp.id || w.toComponentId === boardComp.id
+    // --- Validation 5: Check that at least one power source is connected ---
+    const allSources = [...components.filter(c => boardTypes.includes(c.type)), ...components.filter(c => powerSourceTypes.includes(c.type))];
+    const connectedSource = allSources.find(src =>
+      wiresState.some(w => w.fromComponentId === src.id || w.toComponentId === src.id)
     );
-    if (boardWires.length === 0) {
-      const msg = `⚠ Connection error — ${boardComp.label} is not connected to any component`;
+    if (!connectedSource) {
+      const msg = `⚠ Connection error — No power source is connected to any component`;
       setStatusMessage(msg);
       setSimError(msg);
       return;
     }
+    const primarySource = connectedSource;
+    const sourceWires = wiresState.filter(
+      w => w.fromComponentId === primarySource.id || w.toComponentId === primarySource.id
+    );
 
     // --- Validation 6: Warn about unconnected non-passive components ---
     const connectedIds = new Set<string>();
     wiresState.forEach(w => { connectedIds.add(w.fromComponentId); connectedIds.add(w.toComponentId); });
-    const passiveTypes = ['breadboard', 'breadboard-half', 'vcc', 'gnd'];
+    const passiveTypes = ['breadboard', 'breadboard-half', 'vcc', 'gnd', 'battery'];
     const unconnected = components.filter(
       c => !connectedIds.has(c.id) && !boardTypes.includes(c.type) && !passiveTypes.includes(c.type)
     );
@@ -317,15 +326,29 @@ export default function App() {
       setStatusMessage(`⚠ Warning: ${names}${more} not connected — simulation may be incomplete`);
     }
 
-    // --- All validations passed — compile and start ---
-    setStatusMessage('Compiling sketch for simulation...');
+    // --- All validations passed ---
     setBottomVisible(true);
     setBottomTab('output');
     setCompileLogs([{ type: 'info', text: '● Validating circuit connections...' }]);
-    setCompileLogs(prev => [...prev, { type: 'success', text: `✓ ${boardComp.label} connected with ${boardWires.length} wire(s)` }]);
+    setCompileLogs(prev => [...prev, { type: 'success', text: `✓ ${primarySource.label} connected with ${sourceWires.length} wire(s)` }]);
     if (unconnected.length > 0) {
       setCompileLogs(prev => [...prev, { type: 'warning', text: `⚠ ${unconnected.length} component(s) not connected` }]);
     }
+
+    // --- If no MCU board, run visual-only simulation (no code needed) ---
+    if (!boardComp) {
+      setCompileLogs(prev => [...prev,
+        { type: 'info', text: '● No MCU detected — running direct circuit simulation' },
+        { type: 'success', text: '▶ Visual simulation started (power source mode)' },
+      ]);
+      setStatusMessage('● Simulation running (visual-only — power source mode)');
+      // Mark simulation as running so the bridge in CircuitCanvas drives power
+      simulationStore.startSimulation('');
+      return;
+    }
+
+    // --- MCU present — compile and start ---
+    setStatusMessage('Compiling sketch for simulation...');
 
     // Get the active code
     const activeTab = codeTabs.find(t => t.id === codeActiveTabId);
@@ -355,6 +378,7 @@ export default function App() {
           setStatusMessage('● Simulation running (AVR @ 16MHz)');
         } else {
           // Compilation server may not return hex — try direct simulation start
+          simulationStore.startSimulation('');
           setCompileLogs(prev => [...prev,
             { type: 'warning', text: '⚠ Compile server did not return .hex — using mock simulation' },
             { type: 'success', text: '▶ Simulation started in visual-only mode' },
@@ -369,6 +393,7 @@ export default function App() {
       }
     } catch (err) {
       // Compile server not reachable — start a visual-only simulation
+      simulationStore.startSimulation('');
       setCompileLogs(prev => [...prev,
         { type: 'warning', text: '⚠ Compile server not reachable — running visual-only simulation' },
         { type: 'info', text: 'To enable full AVR simulation, start: node server/index.js' },
@@ -396,7 +421,10 @@ export default function App() {
   const [historyIndex, setHistoryIndex] = useState(0);
 
   const pushHistory = useCallback((newComponents: PlacedComponent[], newWires: Wire[]) => {
-    setHistory(prev => [...prev.slice(0, historyIndex + 1), { components: newComponents, wires: newWires }]);
+    setHistory(prev => {
+      const nextHistory = [...prev.slice(0, historyIndex + 1), { components: newComponents, wires: newWires }];
+      return nextHistory;
+    });
     setHistoryIndex(prev => prev + 1);
   }, [historyIndex]);
 
@@ -595,8 +623,10 @@ export default function App() {
         const a = document.createElement('a');
         a.href = url;
         a.download = 'circuit-project.json';
+        document.body.appendChild(a);
         a.click();
-        URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 100);
         setStatusMessage('Project saved');
         break;
       }
@@ -607,8 +637,10 @@ export default function App() {
         const a = document.createElement('a');
         a.href = url;
         a.download = 'circuit-project.json';
+        document.body.appendChild(a);
         a.click();
-        URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 100);
         setStatusMessage('Project saved as...');
         break;
       }
@@ -622,8 +654,10 @@ export default function App() {
           const a = document.createElement('a');
           a.href = url;
           a.download = 'schematic.svg';
+          document.body.appendChild(a);
           a.click();
-          URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 100);
           setStatusMessage('Exported schematic as SVG');
         }
         break;
@@ -700,8 +734,10 @@ export default function App() {
         const a = document.createElement('a');
         a.href = url;
         a.download = 'bill-of-materials.txt';
+        document.body.appendChild(a);
         a.click();
-        URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 100);
         setStatusMessage('BOM exported');
         break;
       }
@@ -992,6 +1028,7 @@ export default function App() {
         <AIPanel
           messages={messages}
           onSendMessage={handleSendMessage}
+          onBuild={handleVerify}
           collapsed={aiPanelCollapsed}
           onToggleCollapse={() => setAiPanelCollapsed(c => !c)}
           darkMode={darkMode}

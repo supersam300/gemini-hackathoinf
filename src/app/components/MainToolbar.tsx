@@ -69,7 +69,7 @@ function Separator({ darkMode = false }: { darkMode?: boolean }) {
   return <div className={`w-[1px] h-[18px] mx-1.5 shrink-0 ${darkMode ? 'bg-[#555]' : 'bg-[#d0d0d0]'}`} />;
 }
 
-export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUndo, onRedo, onResetView, darkMode, boardName }: MainToolbarProps) {
+export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUndo, onRedo, onResetView, darkMode, boardName, activeView, onSimulate, isSimulating }: MainToolbarProps) {
   const dm = !!darkMode;
   const zoomIn = () => onZoomChange(Math.min(zoom + 10, 300));
   const zoomOut = () => onZoomChange(Math.max(zoom - 10, 25));
@@ -134,6 +134,13 @@ export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUn
       {/* Canvas-only Drawing Tools */}
       {activeView === 'simulation' && (
         <>
+          <ToolButton title="Run Simulation (F5)" onClick={() => onSimulate && onSimulate()} darkMode={dm}>
+            <Play size={14} style={{ color: dm ? '#73C991' : '#2e7d32' }} />
+            <span className="text-[12px] font-medium" style={{ color: dm ? '#73C991' : '#2e7d32' }}>{isSimulating ? 'Stop' : 'Simulate'}</span>
+          </ToolButton>
+
+          <Separator darkMode={dm} />
+
           <ToolButton
             tool="select"
             activeTool={activeTool}
