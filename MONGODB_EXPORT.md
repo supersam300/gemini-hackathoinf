@@ -4,12 +4,12 @@ This document explains how SimuIDE connects to MongoDB Atlas to **save and load*
 
 ## Overview
 
-SimuIDE uses a MongoDB Atlas cluster to persist circuits. When you click **💾 Save** in the header, the app serializes:
+SimuIDE uses a MongoDB Atlas cluster to persist circuits. When you click **Save** in the header, the app serializes:
 - All canvas components (type, label, x/y position, handles)
 - All wire connections between components
 - The code from the IDE editor (including the language setting)
 
-When you click **📂 Load**, a dialog lists all saved circuits — click one to restore the full canvas and code.
+When you click **Load**, a dialog lists all saved circuits — click one to restore the full canvas and code.
 
 ---
 
@@ -176,7 +176,7 @@ const circuitSchema = new mongoose.Schema({
 
 ### Save (from Header)
 
-The **💾 Save** button in the header calls `projectStore.saveToCloud(name)`, which:
+The **Save** button in the header calls `projectStore.saveToCloud(name)`, which:
 
 1. Reads `diagramStore` → serializes all nodes (with positions) and edges
 2. Reads `editorStore` → captures the current code and language
@@ -185,7 +185,7 @@ The **💾 Save** button in the header calls `projectStore.saveToCloud(name)`, w
 
 ### Load (from Header)
 
-The **📂 Load** button opens `LoadDialog`, which:
+The **Load** button opens `LoadDialog`, which:
 
 1. Fetches `GET /api/circuits` to list all saved circuits
 2. Displays project name, component count, language, and last-updated date
@@ -250,13 +250,13 @@ db.circuits.find(
 
 ```
 Header.tsx                          server/index.js
-  💾 Save ──→ projectStore          ├── /api/circuits (routes/circuits.js)
+  Save ──→ projectStore          ├── /api/circuits (routes/circuits.js)
                │  saveToCloud()     │     POST   → Circuit.create / findByIdAndUpdate
                │  reads diagram     │     GET    → Circuit.find (list)
                │  reads editor      │     GET:id → Circuit.findById
                │  POST /api/circuits│     DELETE → Circuit.findByIdAndDelete
                │                    │
-  📂 Load ──→ LoadDialog            ├── models/Circuit.js (Mongoose schema)
+  Load ──→ LoadDialog            ├── models/Circuit.js (Mongoose schema)
                │  GET /api/circuits │
                │  loadFromCloud()   └── db.js (MongoDB Atlas connection)
                │  restores diagram

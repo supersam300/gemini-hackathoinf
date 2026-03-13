@@ -2,7 +2,7 @@
 
 A web-based circuit simulator and IDE similar to Wokwi. Drag and drop electronic components, design complex circuits, code your microcontrollers in C/C++, and simulate everything directly in the browser.
 
-## ✨ Features
+## Features
 
 - **Interactive Circuit Canvas:** Drag, drop, and wire components on a dynamic grid.
 - **Microcontroller Support:** Simulate Arduino Uno, Nano, Mega, and ESP32 boards.
@@ -12,7 +12,7 @@ A web-based circuit simulator and IDE similar to Wokwi. Drag and drop electronic
 - **AI Assistant Pipeline:** Integrated Gemini AI chat for coding help and circuit analysis.
 - **Project Management:** Save and load projects locally (`.json`) or sync them to the cloud.
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 Make sure you have Node.js and npm installed on your system.
@@ -34,7 +34,7 @@ Make sure you have Node.js and npm installed on your system.
 npm run dev:full
 ```
 
-## 🛠️ Technology Stack
+## Technology Stack
 
 - **Frontend:** React 18, TypeScript, Vite
 - **Styling:** Tailwind CSS
@@ -43,7 +43,7 @@ npm run dev:full
 - **Simulation Engine:** AVR8js
 - **Canvas / Components:** Custom SVG rendering & `@wokwi/elements` custom elements
 
-## 📚 Documentation
+## Documentation
 
 Detailed documentation about specific parts of the project can be found in the following files:
 
@@ -52,7 +52,7 @@ Detailed documentation about specific parts of the project can be found in the f
 - [`DOCKER.md`](./DOCKER.md) - Containerization instructions and deployment setups.
 - [`MONGODB_EXPORT.md`](./MONGODB_EXPORT.md) - Database schema and data export documentation.
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
