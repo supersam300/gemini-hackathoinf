@@ -23,11 +23,22 @@ interface BottomPanelProps {
   isCompiling: boolean;
   activeTab: PanelTab;
   onTabChange: (tab: PanelTab) => void;
+  serialOutput?: string;
   darkMode?: boolean;
 }
 
-function ProblemsTab() {
-  const problems: { type: string; file: string; line: number; msg: string }[] = [];
+function ProblemsTab({ logs }: { logs: { type: string; text: string }[] }) {
+  const problems = logs.filter(l => l.type === 'error' || l.type === 'warning');
+  
+  if (problems.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center flex-1 h-full text-[#858585] py-10">
+        <CheckCircle2 size={32} className="mb-2 opacity-50" />
+        <span className="text-sm">No problems have been detected in the workspace so far.</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "thin", scrollbarColor: "#424242 transparent" }}>
       {problems.map((p, i) => (
@@ -36,14 +47,11 @@ function ProblemsTab() {
           className="flex items-start gap-2 px-3 py-1.5 hover:bg-[#2a2d2e] cursor-pointer"
           style={{ borderBottom: "1px solid #1a1a1a" }}
         >
-          <span style={{ color: p.type === "warning" ? "#cca700" : "#75BEFF", flexShrink: 0, marginTop: "1px" }}>
-            {p.type === "warning" ? <AlertCircle size={14} /> : <Info size={14} />}
+          <span style={{ color: p.type === "warning" ? "#cca700" : "#F44747", flexShrink: 0, marginTop: "1px" }}>
+            {p.type === "warning" ? <AlertCircle size={14} /> : <AlertCircle size={14} />}
           </span>
           <div>
-            <span style={{ fontSize: "13px", color: "#cccccc" }}>{p.msg}</span>
-            <span style={{ fontSize: "11px", color: "#858585", marginLeft: "8px" }}>
-              {p.file}:{p.line}
-            </span>
+            <span style={{ fontSize: "13px", color: "#cccccc" }}>{p.text}</span>
           </div>
         </div>
       ))}
@@ -170,12 +178,26 @@ function TerminalTab() {
   );
 }
 
-function SerialMonitorTab() {
-  const [messages, setMessages] = useState(serialMessages);
+function SerialMonitorTab({ serialOutput }: { serialOutput?: string }) {
+  const [messages, setMessages] = useState<{ time: string; type: string; text: string }[]>([]);
   const [input, setInput] = useState("");
   const [baud, setBaud] = useState("9600");
   const [autoscroll, setAutoscroll] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Sync with live simulation output
+  const lastOutputRef = useRef("");
+  useEffect(() => {
+    if (serialOutput && serialOutput !== lastOutputRef.current) {
+      const newChars = serialOutput.slice(lastOutputRef.current.length);
+      lastOutputRef.current = serialOutput;
+      
+      const now = new Date();
+      const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
+      
+      setMessages((m) => [...m, { time, type: "output", text: newChars }]);
+    }
+  }, [serialOutput]);
 
   useEffect(() => {
     if (autoscroll) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -294,6 +316,7 @@ export function BottomPanel({
   isCompiling,
   activeTab,
   onTabChange,
+  serialOutput,
   darkMode = true,
 }: BottomPanelProps) {
   if (!isVisible) return null;
@@ -348,10 +371,10 @@ export function BottomPanel({
 
       {/* Panel Content */}
       <div className="flex flex-col overflow-hidden" style={{ height: "200px" }}>
-        {activeTab === "problems" && <ProblemsTab />}
+        {activeTab === "problems" && <ProblemsTab logs={compileLogs} />}
         {activeTab === "output" && <OutputTab logs={compileLogs} isCompiling={isCompiling} />}
         {activeTab === "terminal" && <TerminalTab />}
-        {activeTab === "serial" && <SerialMonitorTab />}
+        {activeTab === "serial" && <SerialMonitorTab serialOutput={serialOutput} />}
       </div>
     </div>
   );

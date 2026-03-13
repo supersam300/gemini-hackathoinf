@@ -163,6 +163,7 @@ const CUSTOM_SIZES: Record<string, { width: number; height: number }> = {
   capacitor: { width: 80, height: 50 },
   breadboard: { width: 478, height: 160 },
   'breadboard-half': { width: 240, height: 160 },
+  battery: { width: 60, height: 100 },
 };
 
 // Generate breadboard pin layout
@@ -534,6 +535,34 @@ function CanvasComponent({
         </g>
       );
 
+    case 'battery':
+      return (
+        <g transform={`translate(${comp.x}, ${comp.y})`} {...baseProps}>
+          {/* Invisible hit area for mouse interaction */}
+          <rect x="-2" y="-2" width="64" height="104" fill="transparent" />
+          
+          {/* Battery Body */}
+          <rect x="5" y="15" width="50" height="80" rx="4" fill="#333" stroke="#555" strokeWidth="2" />
+          
+          {/* Terminals (Targeting POS x:20 y:15 and NEG x:40 y:15 as defined in pins) */}
+          <rect x="15" y="5" width="10" height="10" rx="1" fill="#bbb" stroke="#888" strokeWidth="1" />
+          <circle cx="20" cy="5" r="4" fill="#ddd" />
+          <rect x="35" y="5" width="10" height="10" rx="1" fill="#bbb" stroke="#888" strokeWidth="1" />
+          <polygon points="35,5 45,5 42,0 38,0" fill="#ddd" />
+          
+          {/* Labels */}
+          <text x="20" y="30" textAnchor="middle" fontSize="12" fill="#f87171" fontWeight="bold">+</text>
+          <text x="40" y="30" textAnchor="middle" fontSize="12" fill="#60a5fa" fontWeight="bold">-</text>
+          <text x="30" y="60" textAnchor="middle" fontSize="16" fill="#f5a623" fontWeight="bold">9V</text>
+          
+          {/* Component Label */}
+          <text x="30" y="110" textAnchor="middle" fontSize="10" fill="#555" fontFamily="monospace">{comp.label}</text>
+          
+          {/* Selection ring */}
+          {comp.selected && <rect x="-3" y="3" width="66" height="94" fill="none" stroke="#0078d7" strokeWidth="1.5" strokeDasharray="4 2" rx="5" />}
+        </g>
+      );
+
     default:
       return (
         <g transform={`translate(${comp.x}, ${comp.y})`} {...baseProps}>
@@ -657,6 +686,12 @@ export function CircuitCanvas({
     if (!typePinsCache.current.has('breadboard-half')) {
       typePinsCache.current.set('breadboard-half', BB_HALF_PINS);
     }
+    if (!typePinsCache.current.has('battery')) {
+      typePinsCache.current.set('battery', [
+        { name: 'POS', x: 20, y: 15, signals: [] },
+        { name: 'NEG', x: 40, y: 15, signals: [] },
+      ]);
+    }
   }, []);
 
   // BUG 3 FIX: Scan ALL pins from wokwi elements including signals.
@@ -766,6 +801,10 @@ export function CircuitCanvas({
            findConnected(c.id, '5V').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, true));
            findConnected(c.id, '3.3V').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, true));
            findConnected(c.id, 'GND').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, false));
+        }
+        if (c.type === 'battery') {
+          findConnected(c.id, 'POS').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, true));
+          findConnected(c.id, 'NEG').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, false));
         }
       });
     };

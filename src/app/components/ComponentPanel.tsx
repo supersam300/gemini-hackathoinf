@@ -40,6 +40,7 @@ const categories: ComponentCategory[] = [
       { id: 'capacitor', label: 'Capacitor', sublabel: '100 nF', color: '#1565c0' },
       { id: 'breadboard', label: 'Breadboard', sublabel: 'Full Size', color: '#e8d5b7' },
       { id: 'breadboard-half', label: 'Breadboard Half', sublabel: 'Half Size', color: '#e8d5b7' },
+      { id: 'battery', label: '9V Battery', sublabel: 'Power Source', color: '#333' },
     ],
   },
   {
@@ -204,6 +205,15 @@ function ComponentIcon({ type }: { type: string }) {
           <circle cx="23" cy="9" r="4" fill="#aaa" />
           <line x1="0" y1="9" x2="8" y2="9" stroke="#555" strokeWidth="1" />
           <line x1="30" y1="9" x2="38" y2="9" stroke="#555" strokeWidth="1" />
+        </svg>
+      );
+    case 'battery':
+      return (
+        <svg width="38" height="18" viewBox="0 0 38 18">
+          <rect x="10" y="2" width="18" height="14" rx="2" fill="#333" stroke="#555" strokeWidth="1" />
+          <rect x="13" y="1" width="4" height="2" fill="#555" />
+          <rect x="21" y="1" width="4" height="2" fill="#555" />
+          <text x="19" y="11" textAnchor="middle" fontSize="6" fill="#f5a623" fontWeight="bold">9V</text>
         </svg>
       );
     case 'potentiometer':

@@ -878,6 +878,8 @@ export default function App() {
         onResetView={() => window.dispatchEvent(new CustomEvent('simuide-reset-view'))}
         onSimulate={handleSimulate}
         isSimulating={simulationStore.isRunning}
+        onVerify={handleVerify}
+        onUpload={handleUpload}
         darkMode={darkMode}
         activeView={activeView}
         boardName={(() => {
@@ -984,6 +986,7 @@ export default function App() {
               isCompiling={verifying || uploading}
               activeTab={bottomTab}
               onTabChange={setBottomTab}
+              serialOutput={simulationStore.serialOutput}
               darkMode={darkMode}
             />
           </div>

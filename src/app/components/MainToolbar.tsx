@@ -16,6 +16,9 @@ interface MainToolbarProps {
   onResetView: () => void;
   onSimulate?: () => void;
   isSimulating?: boolean;
+  onVerify?: () => void;
+  onUpload?: () => void;
+  onDebug?: () => void;
   darkMode?: boolean;
   boardName?: string;
   activeView?: ActiveView;
@@ -69,7 +72,7 @@ function Separator({ darkMode = false }: { darkMode?: boolean }) {
   return <div className={`w-[1px] h-[18px] mx-1.5 shrink-0 ${darkMode ? 'bg-[#555]' : 'bg-[#d0d0d0]'}`} />;
 }
 
-export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUndo, onRedo, onResetView, darkMode, boardName }: MainToolbarProps) {
+export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUndo, onRedo, onResetView, darkMode, boardName, activeView, onSimulate, isSimulating, onVerify, onUpload, onDebug }: MainToolbarProps) {
   const dm = !!darkMode;
   const zoomIn = () => onZoomChange(Math.min(zoom + 10, 300));
   const zoomOut = () => onZoomChange(Math.max(zoom - 10, 25));
@@ -103,7 +106,7 @@ export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUn
         <>
           <ToolButton
             title="Verify / Compile (Ctrl+R)"
-            onClick={() => { }}
+            onClick={() => onVerify?.()}
             tool=""
             activeTool=""
             darkMode={dm}
@@ -112,19 +115,21 @@ export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUn
             <span className="text-[12px] font-medium" style={{ color: dm ? '#00b8c4' : '#007a80' }}>Verify</span>
           </ToolButton>
 
-          <ToolButton title="Upload to Board (Ctrl+U)" onClick={() => { }} darkMode={dm}>
+          <ToolButton title="Upload to Board (Ctrl+U)" onClick={() => onUpload?.()} darkMode={dm}>
             <Upload size={15} style={{ color: dm ? '#6cb4ee' : '#1565c0' }} />
             <span className="text-[12px] font-medium" style={{ color: dm ? '#6cb4ee' : '#1565c0' }}>Upload</span>
           </ToolButton>
 
-          <ToolButton title="Debug Mode" onClick={() => { }} darkMode={dm}>
+          <ToolButton title="Debug Mode" onClick={() => onDebug?.()} darkMode={dm}>
             <Bug size={15} style={{ color: dm ? '#e0a060' : '#b85c00' }} />
             <span className="text-[12px] font-medium" style={{ color: dm ? '#e0a060' : '#b85c00' }}>Debug</span>
           </ToolButton>
 
-          <ToolButton title="Run Simulation (F5)" onClick={() => { }} darkMode={dm}>
-            <Play size={14} style={{ color: dm ? '#73C991' : '#2e7d32' }} />
-            <span className="text-[12px] font-medium" style={{ color: dm ? '#73C991' : '#2e7d32' }}>Simulate</span>
+          <ToolButton title={isSimulating ? "Stop Simulation (F6)" : "Run Simulation (F5)"} onClick={() => onSimulate?.()} darkMode={dm}>
+            <Play size={14} style={{ color: isSimulating ? (dm ? '#ff8a80' : '#d32f2f') : (dm ? '#73C991' : '#2e7d32') }} />
+            <span className="text-[12px] font-medium" style={{ color: isSimulating ? (dm ? '#ff8a80' : '#d32f2f') : (dm ? '#73C991' : '#2e7d32') }}>
+              {isSimulating ? 'Stop' : 'Simulate'}
+            </span>
           </ToolButton>
 
           <Separator darkMode={dm} />
