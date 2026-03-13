@@ -26,6 +26,12 @@ WORKDIR /app
 # Install a simple HTTP server to serve the static files
 RUN npm install -g serve
 
+# Install arduino-cli and AVR core
+RUN apk add --no-cache curl \
+    && curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh \
+    && /bin/arduino-cli core update-index \
+    && /bin/arduino-cli core install arduino:avr
+
 # Copy built application from builder stage
 COPY --from=builder /app/dist ./dist
 

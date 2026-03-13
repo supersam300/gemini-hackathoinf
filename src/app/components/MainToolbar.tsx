@@ -19,6 +19,9 @@ interface MainToolbarProps {
   onVerify?: () => void;
   onUpload?: () => void;
   onDebug?: () => void;
+  onNewProject?: () => void;
+  onOpenProject?: () => void;
+  onSaveProject?: () => void;
   darkMode?: boolean;
   boardName?: string;
   activeView?: ActiveView;
@@ -72,7 +75,7 @@ function Separator({ darkMode = false }: { darkMode?: boolean }) {
   return <div className={`w-[1px] h-[18px] mx-1.5 shrink-0 ${darkMode ? 'bg-[#555]' : 'bg-[#d0d0d0]'}`} />;
 }
 
-export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUndo, onRedo, onResetView, darkMode, boardName, activeView, onSimulate, isSimulating, onVerify, onUpload, onDebug }: MainToolbarProps) {
+export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUndo, onRedo, onResetView, darkMode, boardName, activeView, onSimulate, isSimulating, onVerify, onUpload, onDebug, onNewProject, onOpenProject, onSaveProject }: MainToolbarProps) {
   const dm = !!darkMode;
   const zoomIn = () => onZoomChange(Math.min(zoom + 10, 300));
   const zoomOut = () => onZoomChange(Math.max(zoom - 10, 25));
@@ -86,15 +89,15 @@ export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUn
       style={{ fontFamily: 'Inter, system-ui, -apple-system, sans-serif' }}
     >
       {/* File Group — always visible */}
-      <ToolButton title="New Project (Ctrl+N)" onClick={() => { }} darkMode={dm}>
+      <ToolButton title="New Project (Ctrl+N)" onClick={() => onNewProject?.()} darkMode={dm}>
         <FilePlus size={15} />
         <span className="hidden sm:inline">New</span>
       </ToolButton>
-      <ToolButton title="Open Project (Ctrl+O)" onClick={() => { }} darkMode={dm}>
+      <ToolButton title="Open Project (Ctrl+O)" onClick={() => onOpenProject?.()} darkMode={dm}>
         <FolderOpen size={15} />
         <span className="hidden sm:inline">Open</span>
       </ToolButton>
-      <ToolButton title="Save (Ctrl+S)" onClick={() => { }} darkMode={dm}>
+      <ToolButton title="Save (Ctrl+S)" onClick={() => onSaveProject?.()} darkMode={dm}>
         <Save size={15} />
         <span className="hidden sm:inline">Save</span>
       </ToolButton>

@@ -10,6 +10,7 @@ import { compileSketch } from '../api/arduino';
 // Code Editor imports
 import { Editor } from './components/arduino-ide/Editor';
 import { BottomPanel } from './components/arduino-ide/BottomPanel';
+import ArduinoToolbar from '../components/arduino/ArduinoToolbar';
 import {
   FileNode,
   OpenTab,
@@ -85,11 +86,7 @@ export default function App() {
   // ── Code Editor state ───────────────────────────────────────────────────
   const [codeTabs, setCodeTabs] = useState<OpenTab[]>([defaultCodeTab]);
   const [codeActiveTabId, setCodeActiveTabId] = useState<string | null>('blink-ino');
-  const [board, setBoard] = useState(BOARDS[0]);
-  const [port, setPort] = useState(PORTS[0]);
-  const [verifying, setVerifying] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [compileLogs, setCompileLogs] = useState<{ type: string; text: string }[]>([]);
+  const activeCode = codeTabs.find((t) => t.id === codeActiveTabId)?.content || '';
   const [bottomVisible, setBottomVisible] = useState(true);
   const [bottomTab, setBottomTab] = useState<BottomTab>('output');
 
@@ -155,86 +152,31 @@ export default function App() {
     );
   }, []);
 
-  // ── Verify using real Arduino backend when available, else mock ─────────
+  // ── Verify using real Arduino backend when available ─────────
   const handleVerify = useCallback(() => {
-    if (verifying || uploading) return;
-    setVerifying(true);
-    setCompileLogs([]);
+    if (arduinoStore.compileStatus === 'running' || arduinoStore.uploadStatus === 'running') return;
+    arduinoStore.clearLog();
     setBottomVisible(true);
     setBottomTab('output');
 
     const activeTab = codeTabs.find((t) => t.id === codeActiveTabId);
     const code = activeTab?.content || '';
 
-    // Try real compile via backend
-    arduinoStore.compile(code).then((success) => {
-      if (success) {
-        setCompileLogs([{ type: 'success', text: '✓ Compiled successfully.' }]);
-      } else {
-        // Fall back to mock output
-        let i = 0;
-        const interval = setInterval(() => {
-          if (i < compilerOutput.length) {
-            setCompileLogs((prev) => [...prev, compilerOutput[i]]);
-            i++;
-          } else {
-            clearInterval(interval);
-          }
-        }, 300);
-      }
-      setVerifying(false);
-    }).catch(() => {
-      // Backend unreachable, use mock
-      let i = 0;
-      const interval = setInterval(() => {
-        if (i < compilerOutput.length) {
-          setCompileLogs((prev) => [...prev, compilerOutput[i]]);
-          i++;
-        } else {
-          clearInterval(interval);
-        }
-      }, 300);
-      setVerifying(false);
-    });
-  }, [verifying, uploading, codeTabs, codeActiveTabId, arduinoStore]);
+    arduinoStore.compile(code);
+  }, [codeTabs, codeActiveTabId, arduinoStore]);
 
   // ── Upload using real Arduino backend when available ────────────────────
   const handleUpload = useCallback(() => {
-    if (verifying || uploading) return;
-    setUploading(true);
-    setCompileLogs([]);
+    if (arduinoStore.compileStatus === 'running' || arduinoStore.uploadStatus === 'running') return;
+    arduinoStore.clearLog();
     setBottomVisible(true);
     setBottomTab('output');
 
     const activeTab = codeTabs.find((t) => t.id === codeActiveTabId);
     const code = activeTab?.content || '';
 
-    arduinoStore.upload(code).then((success) => {
-      if (success) {
-        setCompileLogs([{ type: 'success', text: `✓ Done uploading to ${board}.` }]);
-      } else {
-        setCompileLogs([{ type: 'error', text: '✗ Upload failed.' }]);
-      }
-      setUploading(false);
-    }).catch(() => {
-      const uploadLogs = [
-        ...compilerOutput,
-        { type: 'info', text: `Connecting to ${port}...` },
-        { type: 'info', text: 'Uploading firmware...' },
-        { type: 'success', text: `✓ Done uploading to ${board}.` },
-      ];
-      let i = 0;
-      const interval = setInterval(() => {
-        if (i < uploadLogs.length) {
-          setCompileLogs((prev) => [...prev, uploadLogs[i]]);
-          i++;
-        } else {
-          clearInterval(interval);
-        }
-      }, 250);
-      setUploading(false);
-    });
-  }, [verifying, uploading, board, port, codeTabs, codeActiveTabId, arduinoStore]);
+    arduinoStore.upload(code);
+  }, [codeTabs, codeActiveTabId, arduinoStore]);
 
   // ── Simulation with connection validation ───────────────────────────────
   const [simError, setSimError] = useState<string | null>(null);
@@ -329,18 +271,17 @@ export default function App() {
     // --- All validations passed ---
     setBottomVisible(true);
     setBottomTab('output');
-    setCompileLogs([{ type: 'info', text: '● Validating circuit connections...' }]);
-    setCompileLogs(prev => [...prev, { type: 'success', text: `✓ ${primarySource.label} connected with ${sourceWires.length} wire(s)` }]);
+    arduinoStore.clearLog();
+    arduinoStore.addLog('● Validating circuit connections...', 'info');
+    arduinoStore.addLog(`✓ ${primarySource.label} connected with ${sourceWires.length} wire(s)`, 'success');
     if (unconnected.length > 0) {
-      setCompileLogs(prev => [...prev, { type: 'warning', text: `⚠ ${unconnected.length} component(s) not connected` }]);
+      arduinoStore.addLog(`⚠ ${unconnected.length} component(s) not connected`, 'warning');
     }
 
     // --- If no MCU board, run visual-only simulation (no code needed) ---
     if (!boardComp) {
-      setCompileLogs(prev => [...prev,
-        { type: 'info', text: '● No MCU detected — running direct circuit simulation' },
-        { type: 'success', text: '▶ Visual simulation started (power source mode)' },
-      ]);
+      arduinoStore.addLog('● No MCU detected — running direct circuit simulation', 'info');
+      arduinoStore.addLog('▶ Visual simulation started (power source mode)', 'success');
       setStatusMessage('● Simulation running (visual-only — power source mode)');
       // Mark simulation as running so the bridge in CircuitCanvas drives power
       simulationStore.startSimulation('');
@@ -357,11 +298,11 @@ export default function App() {
       const msg = '⚠ Not connected — No code to simulate. Write or open an Arduino sketch first';
       setStatusMessage(msg);
       setSimError(msg);
-      setCompileLogs(prev => [...prev, { type: 'error', text: msg }]);
+      arduinoStore.addLog(msg, 'error');
       return;
     }
 
-    setCompileLogs(prev => [...prev, { type: 'info', text: '● Compiling sketch...' }]);
+    arduinoStore.addLog('● Compiling sketch...', 'info');
 
     try {
       const result = await arduinoStore.compile(code);
@@ -371,34 +312,28 @@ export default function App() {
 
         if (hexResult?.hex) {
           simulationStore.startSimulation(hexResult.hex);
-          setCompileLogs(prev => [...prev,
-            { type: 'success', text: '✓ Compilation successful' },
-            { type: 'success', text: '▶ Simulation started (AVR @ 16MHz)' },
-          ]);
+          arduinoStore.addLog('✓ Compilation successful', 'success');
+          arduinoStore.addLog('▶ Simulation started (AVR @ 16MHz)', 'success');
           setStatusMessage('● Simulation running (AVR @ 16MHz)');
         } else {
           // Compilation server may not return hex — try direct simulation start
           simulationStore.startSimulation('');
-          setCompileLogs(prev => [...prev,
-            { type: 'warning', text: '⚠ Compile server did not return .hex — using mock simulation' },
-            { type: 'success', text: '▶ Simulation started in visual-only mode' },
-          ]);
+          arduinoStore.addLog('⚠ Compile server did not return .hex — using mock simulation', 'warning');
+          arduinoStore.addLog('▶ Simulation started in visual-only mode', 'success');
           setStatusMessage('● Simulation running (visual-only mode)');
         }
       } else {
         const msg = '✗ Compilation failed — check your code for errors';
-        setCompileLogs(prev => [...prev, { type: 'error', text: msg }]);
+        arduinoStore.addLog(msg, 'error');
         setStatusMessage(msg);
         setSimError(msg);
       }
     } catch (err) {
       // Compile server not reachable — start a visual-only simulation
       simulationStore.startSimulation('');
-      setCompileLogs(prev => [...prev,
-        { type: 'warning', text: '⚠ Compile server not reachable — running visual-only simulation' },
-        { type: 'info', text: 'To enable full AVR simulation, start: node server/index.js' },
-        { type: 'success', text: '▶ Simulation started in visual-only mode' },
-      ]);
+      arduinoStore.addLog('⚠ Compile server not reachable — running visual-only simulation', 'warning');
+      arduinoStore.addLog('To enable full AVR simulation, start: node server/index.js', 'info');
+      arduinoStore.addLog('▶ Simulation started in visual-only mode', 'success');
       setStatusMessage('● Simulation running (visual-only — compile server offline)');
     }
   }, [components, wiresState, simulationStore, codeTabs, codeActiveTabId, arduinoStore]);
@@ -916,6 +851,9 @@ export default function App() {
         isSimulating={simulationStore.isRunning}
         onVerify={handleVerify}
         onUpload={handleUpload}
+        onNewProject={() => handleMenuAction('New Project')}
+        onOpenProject={() => handleMenuAction('Open...')}
+        onSaveProject={() => handleMenuAction('Save')}
         darkMode={darkMode}
         activeView={activeView}
         boardName={(() => {
@@ -964,7 +902,7 @@ export default function App() {
 
         {/* Center area: switches between canvas and code editor */}
         {activeView === 'simulation' ? (
-          <div className="flex-1 relative overflow-hidden w-full h-full" style={{ minHeight: 0 }}>
+          <div className="flex-1 relative overflow-hidden w-full h-full flex" style={{ minHeight: 0 }}>
             <CircuitCanvas
               components={components}
               activeTool={activeTool}
@@ -1005,6 +943,7 @@ export default function App() {
           </div>
         ) : (
           <div className="flex flex-col flex-1 overflow-hidden">
+            <ArduinoToolbar code={activeCode} />
             <div className="flex-1 overflow-hidden">
               <Editor
                 tabs={codeTabs}
@@ -1018,8 +957,8 @@ export default function App() {
             <BottomPanel
               isVisible={bottomVisible}
               onClose={() => setBottomVisible(false)}
-              compileLogs={compileLogs}
-              isCompiling={verifying || uploading}
+              compileLogs={arduinoStore.outputLog}
+              isCompiling={arduinoStore.compileStatus === 'running' || arduinoStore.uploadStatus === 'running'}
               activeTab={bottomTab}
               onTabChange={setBottomTab}
               serialOutput={simulationStore.serialOutput}

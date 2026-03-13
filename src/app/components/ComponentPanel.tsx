@@ -208,15 +208,6 @@ function ComponentIcon({ type }: { type: string }) {
           <line x1="30" y1="9" x2="38" y2="9" stroke="#555" strokeWidth="1" />
         </svg>
       );
-    case 'battery':
-      return (
-        <svg width="38" height="18" viewBox="0 0 38 18">
-          <rect x="10" y="2" width="18" height="14" rx="2" fill="#333" stroke="#555" strokeWidth="1" />
-          <rect x="13" y="1" width="4" height="2" fill="#555" />
-          <rect x="21" y="1" width="4" height="2" fill="#555" />
-          <text x="19" y="11" textAnchor="middle" fontSize="6" fill="#f5a623" fontWeight="bold">9V</text>
-        </svg>
-      );
     case 'potentiometer':
       return (
         <svg width="38" height="18" viewBox="0 0 38 18">
@@ -547,7 +538,11 @@ export function ComponentPanel({ selectedComponent, onSelectComponent, darkMode 
   const toggleCategory = (id: string) => {
     setOpenCategories(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   };

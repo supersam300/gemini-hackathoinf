@@ -164,7 +164,6 @@ const CUSTOM_SIZES: Record<string, { width: number; height: number }> = {
   capacitor: { width: 80, height: 50 },
   breadboard: { width: 478, height: 160 },
   'breadboard-half': { width: 240, height: 160 },
-  battery: { width: 60, height: 100 },
 };
 
 // Generate breadboard pin layout
@@ -503,26 +502,6 @@ function CanvasComponent({
         </g>
       );
 
-    case 'battery':
-      return (
-        <g transform={`translate(${comp.x}, ${comp.y})`} {...baseProps}>
-          {/* Invisible hit area */}
-          <rect x="-2" y="8" width="64" height="74" fill="transparent" />
-          {/* Main Body */}
-          <rect x="0" y="10" width="60" height="70" rx="4" fill="#333" stroke="#555" strokeWidth="2" />
-          {/* Terminals */}
-          <rect x="15" y="0" width="10" height="10" fill="#777" rx="1" />
-          <rect x="35" y="0" width="10" height="10" fill="#777" rx="1" />
-          {/* Decals */}
-          <text x="30" y="50" textAnchor="middle" fontSize="16" fill="#fff" fontWeight="bold">9V</text>
-          <text x="20" y="25" textAnchor="middle" fontSize="14" fill="#c62828" fontWeight="bold">+</text>
-          <text x="40" y="23" textAnchor="middle" fontSize="14" fill="#1565c0" fontWeight="bold">-</text>
-          {/* Label */}
-          <text x="30" y="94" textAnchor="middle" fontSize="9" fill="#555" fontFamily="monospace">{comp.label}</text>
-          {/* Selection Ring */}
-          {comp.selected && <rect x="-3" y="-3" width="66" height="86" fill="none" stroke="#0078d7" strokeWidth="1.5" strokeDasharray="4 2" rx="4" />}
-        </g>
-      );
 
     case 'capacitor':
       return (
@@ -1048,7 +1027,9 @@ export function CircuitCanvas({
     // 3. Setup Pin Listening (only active when simulator exists)
     let original: any = null;
     if (simulator) {
+      // eslint-disable-next-line react-hooks/immutability
       original = simulator.onPinChange;
+      // eslint-disable-next-line react-hooks/immutability
       simulator.onPinChange = (port, pin, value) => {
         if (original) original(port, pin, value);
         const aPin = Object.entries(UNO_PIN_MAP).find(([_,v])=>v.port===port && v.pin===pin)?.[0];

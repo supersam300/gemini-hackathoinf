@@ -38,6 +38,7 @@ interface ArduinoStore {
     compile: (code: string) => Promise<boolean>;
     upload: (code: string) => Promise<boolean>;
     clearLog: () => void;
+    addLog: (text: string, type: OutputLine["type"]) => void;
     toggleConsole: () => void;
 }
 
@@ -60,6 +61,8 @@ export const useArduinoStore = create<ArduinoStore>((set, get) => ({
     toggleConsole: () => set((s) => ({ consoleOpen: !s.consoleOpen })),
 
     clearLog: () => set({ outputLog: [] }),
+    addLog: (text: string, type: OutputLine["type"]) =>
+        set((s) => ({ outputLog: [...s.outputLog, ...makeLines(text, type)] })),
 
     refreshPorts: async () => {
         set({ portsLoading: true });

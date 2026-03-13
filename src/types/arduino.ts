@@ -18,7 +18,7 @@ export type BuildStatus = "idle" | "running" | "success" | "error";
 export interface OutputLine {
     id: number;
     text: string;
-    type: "stdout" | "stderr" | "info" | "success";
+    type: "stdout" | "stderr" | "info" | "success" | "warning" | "error";
     timestamp: number;
 }
 

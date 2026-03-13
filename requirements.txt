@@ -1,0 +1,25 @@
+// Project dependencies
+@monaco-editor/react: ^4.7.0
+@wokwi/elements: ^1.9.2
+@xyflow/react: ^12.4.4
+avr8js: ^0.21.0
+lucide-react: ^0.577.0
+react: ^18.3.1
+react-dom: ^18.3.1
+zustand: ^5.0.3
+
+// Dev dependencies
+@types/react: ^18.3.18
+@types/react-dom: ^18.3.5
+@typescript-eslint/eslint-plugin: ^8.57.0
+@typescript-eslint/parser: ^8.57.0
+@vitejs/plugin-react: ^4.3.4
+autoprefixer: ^10.4.20
+concurrently: ^8.2.2
+eslint: ^8.57.0
+eslint-plugin-react: ^7.37.5
+eslint-plugin-react-hooks: ^7.0.1
+postcss: ^8.5.1
+tailwindcss: ^3.4.17
+typescript: ~5.6.2
+vite: ^6.1.0
