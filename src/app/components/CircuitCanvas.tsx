@@ -160,6 +160,7 @@ function getWireColor(fromName: string, toName: string): string {
 
 // Sizes for custom SVG (non-wokwi) components
 const CUSTOM_SIZES: Record<string, { width: number; height: number }> = {
+  battery: { width: 60, height: 80 },
   capacitor: { width: 80, height: 50 },
   breadboard: { width: 478, height: 160 },
   'breadboard-half': { width: 240, height: 160 },
@@ -502,6 +503,27 @@ function CanvasComponent({
         </g>
       );
 
+    case 'battery':
+      return (
+        <g transform={`translate(${comp.x}, ${comp.y})`} {...baseProps}>
+          {/* Invisible hit area */}
+          <rect x="-2" y="8" width="64" height="74" fill="transparent" />
+          {/* Main Body */}
+          <rect x="0" y="10" width="60" height="70" rx="4" fill="#333" stroke="#555" strokeWidth="2" />
+          {/* Terminals */}
+          <rect x="15" y="0" width="10" height="10" fill="#777" rx="1" />
+          <rect x="35" y="0" width="10" height="10" fill="#777" rx="1" />
+          {/* Decals */}
+          <text x="30" y="50" textAnchor="middle" fontSize="16" fill="#fff" fontWeight="bold">9V</text>
+          <text x="20" y="25" textAnchor="middle" fontSize="14" fill="#c62828" fontWeight="bold">+</text>
+          <text x="40" y="23" textAnchor="middle" fontSize="14" fill="#1565c0" fontWeight="bold">-</text>
+          {/* Label */}
+          <text x="30" y="94" textAnchor="middle" fontSize="9" fill="#555" fontFamily="monospace">{comp.label}</text>
+          {/* Selection Ring */}
+          {comp.selected && <rect x="-3" y="-3" width="66" height="86" fill="none" stroke="#0078d7" strokeWidth="1.5" strokeDasharray="4 2" rx="4" />}
+        </g>
+      );
+
     case 'capacitor':
       return (
         <g transform={`translate(${comp.x}, ${comp.y})`} {...baseProps}>
@@ -674,6 +696,12 @@ export function CircuitCanvas({
 
   // Pre-seed pins for custom (non-wokwi) SVG components
   useEffect(() => {
+    if (!typePinsCache.current.has('battery')) {
+      typePinsCache.current.set('battery', [
+        { name: 'VCC', x: 20, y: 5, signals: [] },
+        { name: 'GND', x: 40, y: 5, signals: [] },
+      ]);
+    }
     if (!typePinsCache.current.has('capacitor')) {
       typePinsCache.current.set('capacitor', [
         { name: 'pin1', x: 0, y: 25, signals: [] },
@@ -752,8 +780,14 @@ export function CircuitCanvas({
   const { isRunning, simulator } = useSimulationStore();
   const wokwiRefs = useRef<Map<string, any>>(new Map());
 
+  // Track powered components for visual effects
+  const [poweredComponents, setPoweredComponents] = useState<Set<string>>(new Set());
+
   useEffect(() => {
-    if (!isRunning || !simulator) return;
+    if (!isRunning) {
+      setPoweredComponents(new Set());
+      return;
+    }
 
     // 1. Build Netlist (Transitive)
     const netlist = new Map<string, { componentId: string; pinName: string }[]>();
@@ -784,18 +818,20 @@ export function CircuitCanvas({
       return results;
     };
 
-    Object.keys(UNO_PIN_MAP).forEach(p => {
-      const ac = localComponents.find(c => c.type.startsWith('arduino-'));
-      if (ac) netlist.set(p, findConnected(ac.id, p));
-    });
+    if (simulator) {
+      Object.keys(UNO_PIN_MAP).forEach(p => {
+        const ac = localComponents.find(c => c.type.startsWith('arduino-'));
+        if (ac) netlist.set(p, findConnected(ac.id, p));
+      });
+    }
 
     // 1b. Permanent Drivers (VCC/GND)
     const drivePower = () => {
       localComponents.forEach(c => {
         const el = wokwiRefs.current.get(c.id);
         if (!el) return;
-        if (c.type === 'vcc') findConnected(c.id, 'VCC').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, true));
-        if (c.type === 'gnd') findConnected(c.id, 'GND').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, false));
+        if (c.type === 'vcc' || c.type === 'battery') findConnected(c.id, 'VCC').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, true));
+        if (c.type === 'gnd' || c.type === 'battery') findConnected(c.id, 'GND').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, false));
         // Also drive the "VCC" and "GND" pins of the main boards if connected
         if (c.type.startsWith('arduino-') || c.type === 'esp32') {
            findConnected(c.id, '5V').forEach(p => wokwiRefs.current.get(p.componentId)?.setPinState?.(p.pinName, true));
@@ -809,6 +845,74 @@ export function CircuitCanvas({
       });
     };
     drivePower();
+
+    // 1c. Visual Power-Path Tracer — find components that sit on a complete VCC→GND path
+    const traceVisualPower = () => {
+      const vccSources = localComponents.filter(c => c.type === 'battery' || c.type === 'vcc');
+      const gndSources = localComponents.filter(c => c.type === 'battery' || c.type === 'gnd');
+      const passthroughTypes = ['resistor', 'capacitor', 'breadboard', 'breadboard-half'];
+
+      // Find all component IDs reachable from VCC pins
+      const vccReachable = new Set<string>();
+      vccSources.forEach(src => {
+        const vccPin = src.type === 'battery' ? 'VCC' : 'VCC';
+        findConnected(src.id, vccPin).forEach(p => vccReachable.add(p.componentId));
+      });
+      // Also from Arduino 5V
+      localComponents.filter(c => c.type.startsWith('arduino-') || c.type === 'esp32').forEach(src => {
+        findConnected(src.id, '5V').forEach(p => vccReachable.add(p.componentId));
+        findConnected(src.id, '3.3V').forEach(p => vccReachable.add(p.componentId));
+      });
+
+      // Find all component IDs reachable from GND pins
+      const gndReachable = new Set<string>();
+      gndSources.forEach(src => {
+        const gndPin = src.type === 'battery' ? 'GND' : 'GND';
+        findConnected(src.id, gndPin).forEach(p => gndReachable.add(p.componentId));
+      });
+      localComponents.filter(c => c.type.startsWith('arduino-') || c.type === 'esp32').forEach(src => {
+        findConnected(src.id, 'GND').forEach(p => gndReachable.add(p.componentId));
+      });
+
+      // Components on BOTH VCC and GND paths are powered (complete circuit)
+      const powered = new Set<string>();
+      localComponents.forEach(comp => {
+        if (passthroughTypes.includes(comp.type)) return; // don't highlight passthrough
+        if (vccReachable.has(comp.id) && gndReachable.has(comp.id)) {
+          powered.add(comp.id);
+        }
+      });
+
+      setPoweredComponents(powered);
+
+      // Directly set visual properties for powered components
+      powered.forEach(compId => {
+        const comp = localComponents.find(c => c.id === compId);
+        if (!comp) return;
+        const el = wokwiRefs.current.get(compId);
+
+        // LED glow
+        if (comp.type.startsWith('led') && comp.type !== 'led-bar-graph' && comp.type !== 'rgb-led') {
+          if (el) el.value = true;
+        }
+        // RGB LED — all channels on
+        if (comp.type === 'rgb-led') {
+          if (el) { el.red = 255; el.green = 255; el.blue = 255; }
+        }
+        // Buzzer
+        if (comp.type === 'buzzer') {
+          if (el) el.hasSignal = true;
+        }
+        // Servo
+        if (comp.type === 'servo') {
+          if (el) el.angle = 90;
+        }
+      });
+    };
+
+    // Run visual tracer initially and on an interval to keep effects alive
+    traceVisualPower();
+    const visualInterval = setInterval(traceVisualPower, 500);
 
     // 2. Setup Input Handlers
     const listeners: { el: any; ev: string; handler: any }[] = [];
@@ -837,7 +941,7 @@ export function CircuitCanvas({
       if (comp.type === 'pushbutton') {
         const h = (e: any) => {
           const p = pinToArduino.get('1') || pinToArduino.get('2') || pinToArduino.values().next().value;
-          if (p) simulator.setPin(p.port, p.pin, e.detail);
+          if (p && simulator) simulator.setPin(p.port, p.pin, e.detail);
         };
         el.addEventListener('button-press', h);
         listeners.push({ el, ev: 'button-press', handler: h });
@@ -846,7 +950,7 @@ export function CircuitCanvas({
       if (comp.type === 'slide-switch') {
         const h = (e: any) => {
           const p = pinToArduino.get('1') || pinToArduino.get('2') || pinToArduino.get('3');
-          if (p) simulator.setPin(p.port, p.pin, e.target.value === '1');
+          if (p && simulator) simulator.setPin(p.port, p.pin, e.target.value === '1');
         };
         el.addEventListener('input', h);
         listeners.push({ el, ev: 'input', handler: h });
@@ -855,7 +959,7 @@ export function CircuitCanvas({
       if (['potentiometer', 'ntc-sensor', 'photoresistor-sensor'].includes(comp.type)) {
         const h = (e: any) => {
           const p = pinToArduino.get('SIG') || pinToArduino.get('2') || Array.from(pinToArduino.values()).find(px => px.name.startsWith('A'));
-          if (p) {
+          if (p && simulator) {
             const val = Math.floor((e.target.value / 100) * 1023);
             simulator.setAnalogPin(parseInt(p.name.substring(1)), val);
           }
@@ -870,9 +974,9 @@ export function CircuitCanvas({
           const px = pinToArduino.get('HORZ');
           const py = pinToArduino.get('VERT');
           const pb = pinToArduino.get('SEL');
-          if (px && px.name.startsWith('A')) simulator.setAnalogPin(parseInt(px.name.substring(1)), Math.floor((x / 100) * 1023));
-          if (py && py.name.startsWith('A')) simulator.setAnalogPin(parseInt(py.name.substring(1)), Math.floor((y / 100) * 1023));
-          if (pb) simulator.setPin(pb.port, pb.pin, button);
+          if (px && px.name.startsWith('A') && simulator) simulator.setAnalogPin(parseInt(px.name.substring(1)), Math.floor((x / 100) * 1023));
+          if (py && py.name.startsWith('A') && simulator) simulator.setAnalogPin(parseInt(py.name.substring(1)), Math.floor((y / 100) * 1023));
+          if (pb && simulator) simulator.setPin(pb.port, pb.pin, button);
         };
         el.addEventListener('input', h);
         listeners.push({ el, ev: 'input', handler: h });
@@ -884,9 +988,9 @@ export function CircuitCanvas({
           const pClk = pinToArduino.get('CLK');
           const pDt = pinToArduino.get('DT');
           const pSw = pinToArduino.get('SW');
-          if (pClk && clk !== undefined) simulator.setPin(pClk.port, pClk.pin, clk);
-          if (pDt && dt !== undefined) simulator.setPin(pDt.port, pDt.pin, dt);
-          if (pSw && sw !== undefined) simulator.setPin(pSw.port, pSw.pin, sw);
+          if (pClk && clk !== undefined && simulator) simulator.setPin(pClk.port, pClk.pin, clk);
+          if (pDt && dt !== undefined && simulator) simulator.setPin(pDt.port, pDt.pin, dt);
+          if (pSw && sw !== undefined && simulator) simulator.setPin(pSw.port, pSw.pin, sw);
         };
         el.addEventListener('change', h);
         listeners.push({ el, ev: 'change', handler: h });
@@ -897,7 +1001,7 @@ export function CircuitCanvas({
           const state = e.target.value;
           for (let i = 1; i <= 8; i++) {
             const p = pinToArduino.get(String(i));
-            if (p) simulator.setPin(p.port, p.pin, state[i - 1] === '1');
+            if (p && simulator) simulator.setPin(p.port, p.pin, state[i - 1] === '1');
           }
         };
         el.addEventListener('input', h);
@@ -916,7 +1020,7 @@ export function CircuitCanvas({
       if (comp.type === 'pir') {
         const h = (e: any) => {
           const p = pinToArduino.get('OUT');
-          if (p) simulator.setPin(p.port, p.pin, e.detail);
+          if (p && simulator) simulator.setPin(p.port, p.pin, e.detail);
         };
         el.addEventListener('motion', h);
         listeners.push({ el, ev: 'motion', handler: h });
@@ -941,103 +1045,104 @@ export function CircuitCanvas({
       }
     });
 
-    // 3. Setup Pin Listening
-    const original = simulator.onPinChange;
-    simulator.onPinChange = (port, pin, value) => {
-      if (original) original(port, pin, value);
-      const aPin = Object.entries(UNO_PIN_MAP).find(([_,v])=>v.port===port && v.pin===pin)?.[0];
-      if (aPin) {
-        (netlist.get(aPin) || []).forEach(p => {
-          const el = wokwiRefs.current.get(p.componentId);
-          if (!el) return;
-          const comp = localComponents.find(c => c.id === p.componentId);
+    // 3. Setup Pin Listening (only active when simulator exists)
+    let original: any = null;
+    if (simulator) {
+      original = simulator.onPinChange;
+      simulator.onPinChange = (port, pin, value) => {
+        if (original) original(port, pin, value);
+        const aPin = Object.entries(UNO_PIN_MAP).find(([_,v])=>v.port===port && v.pin===pin)?.[0];
+        if (aPin) {
+          (netlist.get(aPin) || []).forEach(p => {
+            const el = wokwiRefs.current.get(p.componentId);
+            if (!el) return;
+            const comp = localComponents.find(c => c.id === p.componentId);
 
-          // HC-SR04 Logic: Trigger -> Echo
-          if (comp?.type === 'hcsr04' && p.pinName === 'TRIG' && value === true) {
-             // Handle HC-SR04 trigger pulse
-             const distance = parseFloat(comp.attrs?.distance || '100');
-             const echoTimeMs = (distance * 58) / 1000; // Simplified calculation
-             
-             // Find ECHO pin connection back to Arduino
-             const echoPin = getAllPins().find(pn => pn.componentId === p.componentId && pn.pinName === 'ECHO');
-             if (echoPin) {
-               // Find which Arduino pin is connected to this ECHO pin
-               const wire = wires.find(w => 
-                 (w.fromComponentId === echoPin.componentId && w.fromPinName === echoPin.pinName) ||
-                 (w.toComponentId === echoPin.componentId && w.toPinName === echoPin.pinName)
-               );
-               if (wire) {
-                 const aSide = wire.fromComponentId.startsWith('arduino') ? 'from' : 'to';
-                 const aPinName = aSide === 'from' ? wire.fromPinName : wire.toPinName;
-                 const m = UNO_PIN_MAP[aPinName];
-                 if (m) {
-                   setTimeout(() => {
-                     simulator.setPin(m.port, m.pin, true);
-                     setTimeout(() => {
-                       simulator.setPin(m.port, m.pin, false);
-                     }, echoTimeMs);
-                   }, 1); // Small delay after trigger
+            // HC-SR04 Logic: Trigger -> Echo
+            if (comp?.type === 'hcsr04' && p.pinName === 'TRIG' && value === true) {
+               const distance = parseFloat(comp.attrs?.distance || '100');
+               const echoTimeMs = (distance * 58) / 1000;
+               
+               const echoPin = getAllPins().find(pn => pn.componentId === p.componentId && pn.pinName === 'ECHO');
+               if (echoPin) {
+                 const wire = wires.find(w => 
+                   (w.fromComponentId === echoPin.componentId && w.fromPinName === echoPin.pinName) ||
+                   (w.toComponentId === echoPin.componentId && w.toPinName === echoPin.pinName)
+                 );
+                 if (wire) {
+                   const aSide = wire.fromComponentId === echoPin.componentId ? (wire.toComponentId.startsWith('arduino') ? 'to' : null) : (wire.fromComponentId.startsWith('arduino') ? 'from' : null);
+                   if (aSide) {
+                      const aPinName = aSide === 'from' ? wire.fromPinName : wire.toPinName;
+                      const m = UNO_PIN_MAP[aPinName];
+                      if (m) {
+                        setTimeout(() => {
+                          simulator.setPin(m.port, m.pin, true);
+                          setTimeout(() => {
+                            simulator.setPin(m.port, m.pin, false);
+                          }, echoTimeMs);
+                        }, 1);
+                      }
+                   }
                  }
                }
-             }
-          }
+            }
 
-          if (comp?.type.startsWith('led') && comp?.type !== 'led-bar-graph') el.value = value;
-          else if (comp?.type === 'buzzer') el.hasSignal = value;
-          else if (comp?.type === 'servo') el.angle = value ? 180 : 0;
-          else if (comp?.type === 'rgb-led') {
-             if (!comp.attrs) comp.attrs = {};
-             comp.attrs[p.pinName] = value ? '1' : '0';
-             if (p.pinName === 'R') el.ledRed = value ? 255 : 0;
-             if (p.pinName === 'G') el.ledGreen = value ? 255 : 0;
-             if (p.pinName === 'B') el.ledBlue = value ? 255 : 0;
-          }
-          else if (comp?.type === '7seg') {
-             if (!comp.attrs) comp.attrs = {};
-             const attrs = comp.attrs;
-             attrs[p.pinName] = value ? '1' : '0';
-             const segments = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'];
-             el.values = segments.map(seg => attrs[seg] === '1' ? 1 : 0);
-          }
-          else if (comp?.type === 'led-bar-graph') {
-             if (!comp.attrs) comp.attrs = {};
-             const attrs = comp.attrs;
-             attrs[p.pinName] = value ? '1' : '0';
-             el.values = Array.from({length: 10}, (_, i) => {
-                 const pName1 = String(i + 1);
-                 const pName2 = 'A' + (i + 1);
-                 return (attrs[pName1] === '1' || attrs[pName2] === '1') ? 1 : 0;
-             });
-          }
-          else if (el.setPinState) el.setPinState(p.pinName, value);
+            if (comp?.type.startsWith('led') && comp?.type !== 'led-bar-graph' && comp?.type !== 'rgb-led') el.value = value;
+            else if (comp?.type === 'buzzer') el.hasSignal = value;
+            else if (comp?.type === 'servo') el.angle = value ? 180 : 0;
+            else if (comp?.type === 'rgb-led') {
+               if (p.pinName === 'R') el.red = value ? 255 : 0;
+               if (p.pinName === 'G') el.green = value ? 255 : 0;
+               if (p.pinName === 'B') el.blue = value ? 255 : 0;
+            }
+            else if (comp?.type === '7seg') {
+               if (!comp.attrs) comp.attrs = {};
+               const attrs = comp.attrs;
+               attrs[p.pinName] = value ? '1' : '0';
+               const segments = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'];
+               el.values = segments.map(seg => attrs[seg] === '1' ? 1 : 0);
+            }
+            else if (comp?.type === 'led-bar-graph') {
+               if (!comp.attrs) comp.attrs = {};
+               const attrs = comp.attrs;
+               attrs[p.pinName] = value ? '1' : '0';
+               el.values = Array.from({length: 10}, (_, i) => {
+                   const pName1 = String(i + 1);
+                   const pName2 = 'A' + (i + 1);
+                   return (attrs[pName1] === '1' || attrs[pName2] === '1') ? 1 : 0;
+               });
+            }
+            else if (el.setPinState) el.setPinState(p.pinName, value);
 
-          // Keypad scanning logic: if row is high, check if key is pressed to set col high
-          if (comp?.type === 'membrane-keypad' && p.pinName.startsWith('R')) {
-            const rowIdx = parseInt(p.pinName.substring(1)) - 1;
-            // Find columns for this keypad
-            const cols = [1,2,3,4]; // 4x4 keypad
-            cols.forEach(cIdx => {
-              if (comp.attrs?.[`key_${rowIdx}_${cIdx-1}`] === '1') {
-                const colPin = getAllPins().find(pn => pn.componentId === comp.id && pn.pinName === `C${cIdx}`);
-                if (colPin) {
-                   // Drive the connected Arduino pin for this column
-                   const wire = wires.find(w => (w.fromComponentId === colPin.componentId && w.fromPinName === colPin.pinName) || (w.toComponentId === colPin.componentId && w.toPinName === colPin.pinName));
-                   if (wire) {
-                     const aSide = wire.fromComponentId.startsWith('arduino') ? 'from' : 'to';
-                     const aPinName = aSide === 'from' ? wire.fromPinName : wire.toPinName;
-                     const targetM = UNO_PIN_MAP[aPinName];
-                     if (targetM) simulator.setPin(targetM.port, targetM.pin, value);
-                   }
+            // Keypad scanning logic: if row is high, check if key is pressed to set col high
+            if (comp?.type === 'membrane-keypad' && p.pinName.startsWith('R')) {
+              const rowIdx = parseInt(p.pinName.substring(1)) - 1;
+              // Find columns for this keypad
+              const cols = [1,2,3,4]; // 4x4 keypad
+              cols.forEach(cIdx => {
+                if (comp.attrs?.[`key_${rowIdx}_${cIdx-1}`] === '1') {
+                  const colPin = getAllPins().find(pn => pn.componentId === comp.id && pn.pinName === `C${cIdx}`);
+                  if (colPin) {
+                     // Drive the connected Arduino pin for this column
+                     const wire = wires.find(w => (w.fromComponentId === colPin.componentId && w.fromPinName === colPin.pinName) || (w.toComponentId === colPin.componentId && w.toPinName === colPin.pinName));
+                     if (wire) {
+                       const aSide = wire.fromComponentId.startsWith('arduino') ? 'from' : 'to';
+                       const aPinName = aSide === 'from' ? wire.fromPinName : wire.toPinName;
+                       const targetM = UNO_PIN_MAP[aPinName];
+                       if (targetM) simulator.setPin(targetM.port, targetM.pin, value);
+                     }
+                  }
                 }
-              }
-            });
-          }
-        });
-      }
-    };
+              });
+            }
+          });
+        }
+      };
+    }
 
     return () => {
-      simulator.onPinChange = original;
+      clearInterval(visualInterval);
+      if (simulator && original !== null) simulator.onPinChange = original;
       listeners.forEach(l => l.el.removeEventListener(l.ev, l.handler));
     };
   }, [isRunning, simulator, wires, localComponents, getAllPins]);
@@ -1544,6 +1649,362 @@ export function CircuitCanvas({
             {localComponents.map(comp => (
               <CanvasComponent key={comp.id} comp={comp} activeTool={activeTool} onClick={handleComponentClick} onMouseDown={handleComponentMouseDown} onContextMenu={handleComponentContextMenu} wokwiRefs={wokwiRefs} />
             ))}
+
+            {/* Simulation visual effects — glow overlays for powered components */}
+            {isRunning && localComponents.filter(c => poweredComponents.has(c.id)).map(comp => {
+              const wDef = WOKWI_MAP[comp.type];
+              const cDef = CUSTOM_SIZES[comp.type];
+              const w = wDef?.width ?? cDef?.width ?? 60;
+              const h = wDef?.height ?? cDef?.height ?? 40;
+              const cx = comp.x + w / 2;
+              const cy = comp.y + h / 2;
+
+              // LED glow effect
+              if (comp.type.startsWith('led') && comp.type !== 'led-bar-graph' && comp.type !== 'rgb-led') {
+                const colorMap: Record<string, string> = {
+                  'led': '#ff3333', 'led-green': '#33ff33', 'led-blue': '#3388ff', 'led-yellow': '#ffcc00',
+                };
+                const glowColor = colorMap[comp.type] || '#ff3333';
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <defs>
+                      <radialGradient id={`led-glow-${comp.id}`}>
+                        <stop offset="0%" stopColor={glowColor} stopOpacity="0.8" />
+                        <stop offset="50%" stopColor={glowColor} stopOpacity="0.3" />
+                        <stop offset="100%" stopColor={glowColor} stopOpacity="0" />
+                      </radialGradient>
+                    </defs>
+                    <circle cx={cx} cy={cy} r={Math.max(w, h) * 0.8} fill={`url(#led-glow-${comp.id})`}>
+                      <animate attributeName="r" values={`${Math.max(w, h) * 0.7};${Math.max(w, h) * 0.9};${Math.max(w, h) * 0.7}`} dur="2s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0.9;1;0.9" dur="2s" repeatCount="indefinite" />
+                    </circle>
+                  </g>
+                );
+              }
+
+              // RGB LED glow
+              if (comp.type === 'rgb-led') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <defs>
+                      <radialGradient id={`rgb-glow-${comp.id}`}>
+                        <stop offset="0%" stopColor="#ffffff" stopOpacity="0.7" />
+                        <stop offset="60%" stopColor="#ffffff" stopOpacity="0.2" />
+                        <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+                      </radialGradient>
+                    </defs>
+                    <circle cx={cx} cy={cy} r={Math.max(w, h) * 0.8} fill={`url(#rgb-glow-${comp.id})`}>
+                      <animate attributeName="opacity" values="0.7;1;0.7" dur="1.5s" repeatCount="indefinite" />
+                    </circle>
+                  </g>
+                );
+              }
+
+              // Buzzer — pulsing sound waves
+              if (comp.type === 'buzzer') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <circle cx={cx} cy={cy} r={w * 0.5} fill="none" stroke="#ff9800" strokeWidth="1.5" opacity="0.6">
+                      <animate attributeName="r" values={`${w * 0.4};${w * 0.8};${w * 0.4}`} dur="0.6s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0.7;0;0.7" dur="0.6s" repeatCount="indefinite" />
+                    </circle>
+                    <circle cx={cx} cy={cy} r={w * 0.3} fill="none" stroke="#ff9800" strokeWidth="1" opacity="0.4">
+                      <animate attributeName="r" values={`${w * 0.3};${w * 0.6};${w * 0.3}`} dur="0.6s" repeatCount="indefinite" begin="0.15s" />
+                      <animate attributeName="opacity" values="0.5;0;0.5" dur="0.6s" repeatCount="indefinite" begin="0.15s" />
+                    </circle>
+                  </g>
+                );
+              }
+
+              // Servo — rotating indicator
+              if (comp.type === 'servo') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <circle cx={cx} cy={cy} r={w * 0.35} fill="none" stroke="#2196f3" strokeWidth="2" strokeDasharray="6 3" opacity="0.6">
+                      <animateTransform attributeName="transform" type="rotate" values={`0 ${cx} ${cy};360 ${cx} ${cy}`} dur="3s" repeatCount="indefinite" />
+                    </circle>
+                    <line x1={cx} y1={cy} x2={cx + w * 0.3} y2={cy} stroke="#2196f3" strokeWidth="2" opacity="0.7">
+                      <animateTransform attributeName="transform" type="rotate" values={`0 ${cx} ${cy};180 ${cx} ${cy};0 ${cx} ${cy}`} dur="2s" repeatCount="indefinite" />
+                    </line>
+                  </g>
+                );
+              }
+
+              // Relay — toggle switch animation
+              if (comp.type === 'relay') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <rect x={comp.x - 3} y={comp.y - 3} width={w + 6} height={h + 6} rx={3} fill="none" stroke="#ff9800" strokeWidth="2" opacity="0.6">
+                      <animate attributeName="opacity" values="0.3;0.8;0.3" dur="1s" repeatCount="indefinite" />
+                    </rect>
+                    {/* Toggle indicator line */}
+                    <line x1={cx - 12} y1={cy} x2={cx + 8} y2={cy - 8} stroke="#ff9800" strokeWidth="2.5" strokeLinecap="round" opacity="0.8">
+                      <animate attributeName="y2" values={`${cy - 8};${cy + 8};${cy - 8}`} dur="1.2s" repeatCount="indefinite" />
+                    </line>
+                    {/* Contact points */}
+                    <circle cx={cx - 12} cy={cy} r={2.5} fill="#ff9800" opacity="0.9" />
+                    <circle cx={cx + 10} cy={cy - 8} r={2} fill="#ff9800" opacity="0.7" />
+                    <circle cx={cx + 10} cy={cy + 8} r={2} fill="#ff9800" opacity="0.7" />
+                    {/* CLICK text */}
+                    <text x={cx} y={comp.y - 6} textAnchor="middle" fontSize="8" fill="#ff9800" fontWeight="bold" opacity="0.7">
+                      <animate attributeName="opacity" values="0;1;0" dur="1.2s" repeatCount="indefinite" />
+                      CLICK
+                    </text>
+                  </g>
+                );
+              }
+
+              // 7-Segment Display — glowing segments
+              if (comp.type === '7seg') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <defs>
+                      <radialGradient id={`seg-glow-${comp.id}`}>
+                        <stop offset="0%" stopColor="#ff1744" stopOpacity="0.5" />
+                        <stop offset="100%" stopColor="#ff1744" stopOpacity="0" />
+                      </radialGradient>
+                    </defs>
+                    <rect x={comp.x - 4} y={comp.y - 4} width={w + 8} height={h + 8} rx={3} fill={`url(#seg-glow-${comp.id})`}>
+                      <animate attributeName="opacity" values="0.5;0.9;0.5" dur="2s" repeatCount="indefinite" />
+                    </rect>
+                    {/* Simulated digit "8" outline */}
+                    <text x={cx} y={cy + 4} textAnchor="middle" fontSize={h * 0.5} fill="#ff1744" fontFamily="monospace" opacity="0.4">
+                      <animate attributeName="opacity" values="0.3;0.6;0.3" dur="1.5s" repeatCount="indefinite" />
+                      8
+                    </text>
+                  </g>
+                );
+              }
+
+              // LCD 16x2 / 20x4 — backlight glow
+              if (comp.type === 'lcd-16x2' || comp.type === 'lcd-20x4') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <defs>
+                      <radialGradient id={`lcd-glow-${comp.id}`}>
+                        <stop offset="0%" stopColor="#7ec8a0" stopOpacity="0.4" />
+                        <stop offset="80%" stopColor="#7ec8a0" stopOpacity="0.1" />
+                        <stop offset="100%" stopColor="#7ec8a0" stopOpacity="0" />
+                      </radialGradient>
+                    </defs>
+                    <rect x={comp.x + 4} y={comp.y + 4} width={w - 8} height={h - 8} rx={2} fill={`url(#lcd-glow-${comp.id})`}>
+                      <animate attributeName="opacity" values="0.6;1;0.6" dur="3s" repeatCount="indefinite" />
+                    </rect>
+                    {/* Cursor blink */}
+                    <rect x={comp.x + 12} y={comp.y + h * 0.35} width={6} height={h * 0.15} fill="#333" opacity="0.8">
+                      <animate attributeName="opacity" values="0;1;0" dur="1s" repeatCount="indefinite" />
+                    </rect>
+                    {/* Power indicator */}
+                    <circle cx={comp.x + w - 8} cy={comp.y + h - 8} r={3} fill="#4caf50" opacity="0.9">
+                      <animate attributeName="opacity" values="0.5;1;0.5" dur="2s" repeatCount="indefinite" />
+                    </circle>
+                  </g>
+                );
+              }
+
+              // OLED SSD1306 — screen on glow
+              if (comp.type === 'ssd1306') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <defs>
+                      <radialGradient id={`oled-glow-${comp.id}`}>
+                        <stop offset="0%" stopColor="#4fc3f7" stopOpacity="0.5" />
+                        <stop offset="80%" stopColor="#4fc3f7" stopOpacity="0.1" />
+                        <stop offset="100%" stopColor="#0288d1" stopOpacity="0" />
+                      </radialGradient>
+                    </defs>
+                    <rect x={comp.x + 2} y={comp.y + 2} width={w - 4} height={h - 4} rx={2} fill={`url(#oled-glow-${comp.id})`}>
+                      <animate attributeName="opacity" values="0.4;0.8;0.4" dur="2.5s" repeatCount="indefinite" />
+                    </rect>
+                    {/* Pixel noise effect */}
+                    {[0,1,2,3,4].map(i => (
+                      <rect key={i} x={comp.x + 10 + i * 18} y={comp.y + h * 0.3} width={12} height={2} fill="#4fc3f7" opacity="0.6">
+                        <animate attributeName="opacity" values="0.2;0.8;0.2" dur={`${0.8 + i * 0.2}s`} repeatCount="indefinite" />
+                      </rect>
+                    ))}
+                  </g>
+                );
+              }
+
+              // NeoPixel — rainbow color cycling
+              if (comp.type === 'neopixel') {
+                const neoColors = ['#ff0000', '#ff8800', '#ffff00', '#00ff00', '#0088ff', '#8800ff'];
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <defs>
+                      <radialGradient id={`neo-glow-${comp.id}`}>
+                        <stop offset="0%" stopColor="#e040fb" stopOpacity="0.8">
+                          <animate attributeName="stop-color" values={neoColors.join(';')} dur="3s" repeatCount="indefinite" />
+                        </stop>
+                        <stop offset="60%" stopColor="#e040fb" stopOpacity="0.3">
+                          <animate attributeName="stop-color" values={[...neoColors.slice(2), ...neoColors.slice(0, 2)].join(';')} dur="3s" repeatCount="indefinite" />
+                        </stop>
+                        <stop offset="100%" stopColor="#e040fb" stopOpacity="0" />
+                      </radialGradient>
+                    </defs>
+                    <circle cx={cx} cy={cy} r={Math.max(w, h) * 0.9} fill={`url(#neo-glow-${comp.id})`}>
+                      <animate attributeName="opacity" values="0.7;1;0.7" dur="1.5s" repeatCount="indefinite" />
+                    </circle>
+                  </g>
+                );
+              }
+
+              // NeoPixel Matrix — multi-colored grid glow
+              if (comp.type === 'neopixel-matrix') {
+                const matrixColors = ['#e040fb', '#00e676', '#ff5252', '#448aff', '#ff9100', '#00e5ff'];
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    {[0,1,2,3].map(row => [0,1,2,3].map(col => {
+                      const colorIdx = (row + col) % matrixColors.length;
+                      const px = comp.x + 12 + col * (w - 24) / 3;
+                      const py = comp.y + 12 + row * (h - 24) / 3;
+                      return (
+                        <circle key={`${row}-${col}`} cx={px} cy={py} r={6} fill={matrixColors[colorIdx]} opacity="0.7">
+                          <animate attributeName="opacity" values="0.3;0.9;0.3" dur={`${1 + (row * 4 + col) * 0.15}s`} repeatCount="indefinite" />
+                          <animate attributeName="r" values="4;7;4" dur={`${1.2 + (row * 4 + col) * 0.1}s`} repeatCount="indefinite" />
+                        </circle>
+                      );
+                    }))}
+                  </g>
+                );
+              }
+
+              // LED Bar Graph — bars lighting up sequentially
+              if (comp.type === 'led-bar-graph') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    {[0,1,2,3,4,5,6,7,8,9].map(i => {
+                      const barColor = i < 3 ? '#4caf50' : i < 7 ? '#ff9800' : '#f44336';
+                      const bx = comp.x + 6 + i * (w - 12) / 10;
+                      return (
+                        <rect key={i} x={bx} y={comp.y + 4} width={(w - 12) / 10 - 2} height={h - 8} rx={1} fill={barColor} opacity="0.6">
+                          <animate attributeName="opacity" values="0.2;0.8;0.2" dur={`${0.5 + i * 0.15}s`} repeatCount="indefinite" begin={`${i * 0.1}s`} />
+                          <animate attributeName="height" values={`${(h - 8) * 0.3};${h - 8};${(h - 8) * 0.3}`} dur={`${0.5 + i * 0.15}s`} repeatCount="indefinite" begin={`${i * 0.1}s`} />
+                          <animate attributeName="y" values={`${comp.y + h - 4 - (h - 8) * 0.3};${comp.y + 4};${comp.y + h - 4 - (h - 8) * 0.3}`} dur={`${0.5 + i * 0.15}s`} repeatCount="indefinite" begin={`${i * 0.1}s`} />
+                        </rect>
+                      );
+                    })}
+                  </g>
+                );
+              }
+
+              // Stepper Motor — spinning gear indicator
+              if (comp.type === 'stepper-motor') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <circle cx={cx} cy={cy} r={w * 0.35} fill="none" stroke="#9e9e9e" strokeWidth="2.5" strokeDasharray="8 4" opacity="0.7">
+                      <animateTransform attributeName="transform" type="rotate" values={`0 ${cx} ${cy};360 ${cx} ${cy}`} dur="2s" repeatCount="indefinite" />
+                    </circle>
+                    <circle cx={cx} cy={cy} r={w * 0.2} fill="none" stroke="#757575" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.5">
+                      <animateTransform attributeName="transform" type="rotate" values={`360 ${cx} ${cy};0 ${cx} ${cy}`} dur="1.5s" repeatCount="indefinite" />
+                    </circle>
+                    {/* Shaft line */}
+                    <line x1={cx} y1={cy} x2={cx + w * 0.28} y2={cy} stroke="#616161" strokeWidth="2.5" strokeLinecap="round" opacity="0.8">
+                      <animateTransform attributeName="transform" type="rotate" values={`0 ${cx} ${cy};360 ${cx} ${cy}`} dur="2s" repeatCount="indefinite" />
+                    </line>
+                    {/* RPM text */}
+                    <text x={cx} y={comp.y + h + 14} textAnchor="middle" fontSize="8" fill="#9e9e9e" fontWeight="bold" opacity="0.7">
+                      ⟳ RUNNING
+                    </text>
+                  </g>
+                );
+              }
+
+              // Ultrasonic HC-SR04 — wave emission
+              if (comp.type === 'hcsr04') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    {/* Wave arcs emanating forward from sensor */}
+                    {[0,1,2].map(i => (
+                      <path key={i} d={`M ${comp.x + w + 5} ${cy - 15} Q ${comp.x + w + 25 + i * 15} ${cy} ${comp.x + w + 5} ${cy + 15}`}
+                        fill="none" stroke="#00bcd4" strokeWidth="1.5" opacity="0.6">
+                        <animate attributeName="opacity" values="0.7;0;0.7" dur="1.2s" repeatCount="indefinite" begin={`${i * 0.4}s`} />
+                        <animate attributeName="stroke-width" values="1.5;0.5;1.5" dur="1.2s" repeatCount="indefinite" begin={`${i * 0.4}s`} />
+                      </path>
+                    ))}
+                    {/* Active indicator */}
+                    <rect x={comp.x - 3} y={comp.y - 3} width={w + 6} height={h + 6} rx={3} fill="none" stroke="#00bcd4" strokeWidth="1.5" opacity="0.4">
+                      <animate attributeName="opacity" values="0.2;0.5;0.2" dur="1.5s" repeatCount="indefinite" />
+                    </rect>
+                    {/* Distance readout */}
+                    <text x={cx} y={comp.y + h + 14} textAnchor="middle" fontSize="8" fill="#00bcd4" fontWeight="bold" opacity="0.8">
+                      ))) SCANNING
+                    </text>
+                  </g>
+                );
+              }
+
+              // PIR Motion Sensor — radial detection pulse
+              if (comp.type === 'pir') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <defs>
+                      <radialGradient id={`pir-glow-${comp.id}`}>
+                        <stop offset="0%" stopColor="#ff5722" stopOpacity="0.3" />
+                        <stop offset="100%" stopColor="#ff5722" stopOpacity="0" />
+                      </radialGradient>
+                    </defs>
+                    {/* Detection zone cone */}
+                    <circle cx={cx} cy={cy} r={w * 0.8} fill={`url(#pir-glow-${comp.id})`}>
+                      <animate attributeName="r" values={`${w * 0.6};${w * 1.2};${w * 0.6}`} dur="2s" repeatCount="indefinite" />
+                    </circle>
+                    {/* Scanning sweeps */}
+                    {[0,1,2].map(i => (
+                      <circle key={i} cx={cx} cy={cy} r={w * 0.4} fill="none" stroke="#ff5722" strokeWidth="1" opacity="0.4">
+                        <animate attributeName="r" values={`${w * 0.3};${w * 0.9};${w * 0.3}`} dur="2s" repeatCount="indefinite" begin={`${i * 0.6}s`} />
+                        <animate attributeName="opacity" values="0.5;0;0.5" dur="2s" repeatCount="indefinite" begin={`${i * 0.6}s`} />
+                      </circle>
+                    ))}
+                    {/* Active text */}
+                    <text x={cx} y={comp.y + h + 16} textAnchor="middle" fontSize="7" fill="#ff5722" fontWeight="bold" opacity="0.7">
+                      DETECTING
+                    </text>
+                  </g>
+                );
+              }
+
+              // DHT22 Temperature/Humidity — reading indicator
+              if (comp.type === 'dht22') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <rect x={comp.x - 3} y={comp.y - 3} width={w + 6} height={h + 6} rx={4} fill="none" stroke="#00796b" strokeWidth="1.5" opacity="0.5">
+                      <animate attributeName="opacity" values="0.3;0.7;0.3" dur="2s" repeatCount="indefinite" />
+                    </rect>
+                    {/* Temperature reading */}
+                    <text x={cx} y={comp.y + h + 12} textAnchor="middle" fontSize="8" fill="#00796b" fontWeight="bold" opacity="0.8">
+                      25°C · 60%
+                    </text>
+                  </g>
+                );
+              }
+
+              // IR Receiver — blinking receive indicator
+              if (comp.type === 'ir-recv') {
+                return (
+                  <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                    <circle cx={cx} cy={comp.y + 6} r={5} fill="#c62828" opacity="0.7">
+                      <animate attributeName="opacity" values="0.3;1;0.3" dur="0.5s" repeatCount="indefinite" />
+                    </circle>
+                    <rect x={comp.x - 3} y={comp.y - 3} width={w + 6} height={h + 6} rx={3} fill="none" stroke="#c62828" strokeWidth="1.5" opacity="0.4">
+                      <animate attributeName="opacity" values="0.2;0.5;0.2" dur="1.5s" repeatCount="indefinite" />
+                    </rect>
+                  </g>
+                );
+              }
+
+              // Generic powered indicator (green pulse outline) — for any other type
+              return (
+                <g key={`glow-${comp.id}`} style={{ pointerEvents: 'none' }}>
+                  <rect x={comp.x - 4} y={comp.y - 4} width={w + 8} height={h + 8} rx={4}
+                    fill="none" stroke="#4caf50" strokeWidth="2" opacity="0.5">
+                    <animate attributeName="opacity" values="0.3;0.7;0.3" dur="1.5s" repeatCount="indefinite" />
+                  </rect>
+                  <circle cx={comp.x + w - 2} cy={comp.y + 2} r={4} fill="#4caf50" opacity="0.8">
+                    <animate attributeName="r" values="3;5;3" dur="1s" repeatCount="indefinite" />
+                  </circle>
+                </g>
+              );
+            })}
 
             {/* Wires — rendered ABOVE components so they are always visible */}
             {wires.map(wire => {

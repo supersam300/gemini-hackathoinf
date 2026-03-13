@@ -15,6 +15,7 @@ export interface ChatMessage {
 interface AIPanelProps {
   messages: ChatMessage[];
   onSendMessage: (content: string) => void;
+  onBuild?: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
   darkMode?: boolean;
@@ -36,7 +37,7 @@ const geminiModels = [
   { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite', tag: 'Stable' },
 ];
 
-export function AIPanel({ messages, onSendMessage, collapsed, onToggleCollapse, darkMode }: AIPanelProps) {
+export function AIPanel({ messages, onSendMessage, onBuild, collapsed, onToggleCollapse, darkMode }: AIPanelProps) {
   const dm = darkMode;
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -249,7 +250,10 @@ export function AIPanel({ messages, onSendMessage, collapsed, onToggleCollapse, 
 
       {/* Build Project button */}
       <div className="px-3 pb-3 pt-1.5 shrink-0">
-        <button className="w-full h-[36px] flex items-center justify-center gap-2 bg-gradient-to-b from-[#1a1a2e] to-[#16213e] text-white text-[13px] font-semibold rounded-lg hover:from-[#2a2a3e] hover:to-[#26314e] transition-all duration-150 shadow-md group">
+        <button
+          onClick={onBuild}
+          className="w-full h-[36px] flex items-center justify-center gap-2 bg-gradient-to-b from-[#1a1a2e] to-[#16213e] text-white text-[13px] font-semibold rounded-lg hover:from-[#2a2a3e] hover:to-[#26314e] transition-all duration-150 shadow-md group"
+        >
           <Code2 size={14} className="text-[#7fdbff]" />
           Build Project
         </button>

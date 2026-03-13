@@ -24,15 +24,23 @@ import {
 
 /** Parse Intel HEX format into a flat byte array */
 function parseHex(hex: string): Uint8Array {
-  const data = new Uint8Array(32768);
+  const data = new Uint8Array(262144); // 256KB for Mega support
+  let highAddress = 0;
   for (const line of hex.split("\n")) {
     if (!line.startsWith(":") || line.length < 11) continue;
     const byteCount = parseInt(line.substring(1, 3), 16);
     const address = parseInt(line.substring(3, 7), 16);
     const type = parseInt(line.substring(7, 9), 16);
+    if (type === 4) {
+      highAddress = parseInt(line.substring(9, 13), 16) << 16;
+      continue;
+    }
     if (type !== 0) continue;
+    const absAddress = highAddress + address;
     for (let i = 0; i < byteCount; i++) {
-      data[address + i] = parseInt(line.substring(9 + i * 2, 11 + i * 2), 16);
+      if (absAddress + i < data.length) {
+        data[absAddress + i] = parseInt(line.substring(9 + i * 2, 11 + i * 2), 16);
+      }
     }
   }
   return data;
@@ -67,7 +75,7 @@ export class ArduinoSimulator {
   onI2CWrite?: I2CWriteCallback;
 
   constructor() {
-    this.cpu = new CPU(new Uint16Array(16384)); // 32KB flash = 16K words
+    this.cpu = new CPU(new Uint16Array(131072)); // 256KB flash = 128K words
     this.clock = new AVRClock(this.cpu, CPU_FREQ, clockConfig);
     this.portB = new AVRIOPort(this.cpu, portBConfig);
     this.portC = new AVRIOPort(this.cpu, portCConfig);
@@ -106,7 +114,7 @@ export class ArduinoSimulator {
         this.twi.completeWrite(true);
       },
       readByte: (ack: boolean) => {
-        this.twi.completeRead(0xFF);
+        this.twi.completeRead(0x00);
       }
     };
 

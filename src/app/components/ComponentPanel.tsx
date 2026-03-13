@@ -38,6 +38,7 @@ const categories: ComponentCategory[] = [
       { id: 'buzzer', label: 'Buzzer', sublabel: 'Active, 5V', color: '#333' },
       { id: 'relay', label: 'Relay', sublabel: '5V SPDT', color: '#555' },
       { id: 'capacitor', label: 'Capacitor', sublabel: '100 nF', color: '#1565c0' },
+      { id: 'battery', label: 'Battery', sublabel: '9V Power Source', color: '#c62828' },
       { id: 'breadboard', label: 'Breadboard', sublabel: 'Full Size', color: '#e8d5b7' },
       { id: 'breadboard-half', label: 'Breadboard Half', sublabel: 'Half Size', color: '#e8d5b7' },
       { id: 'battery', label: '9V Battery', sublabel: 'Power Source', color: '#333' },
@@ -243,6 +244,16 @@ function ComponentIcon({ type }: { type: string }) {
           <rect x="6" y="1" width="26" height="16" rx="1" fill="#4a6fa5" stroke="#555" strokeWidth="1" />
           <rect x="10" y="4" width="18" height="10" fill="#3a5a8a" rx="1" />
           <text x="19" y="12" textAnchor="middle" fontSize="5.5" fill="#ccc">RELAY</text>
+        </svg>
+      );
+    case 'battery':
+      return (
+        <svg width="38" height="18" viewBox="0 0 38 18">
+          <rect x="10" y="2" width="18" height="14" rx="2" fill="#333" stroke="#555" strokeWidth="1" />
+          <rect x="14" y="0" width="10" height="2" fill="#777" />
+          <text x="19" y="12" textAnchor="middle" fontSize="6" fill="#fff" fontWeight="bold">9V</text>
+          <text x="12" y="8" fontSize="6" fill="#c62828" fontWeight="bold">+</text>
+          <text x="26" y="8" fontSize="6" fill="#1565c0" fontWeight="bold">-</text>
         </svg>
       );
     case '7seg':

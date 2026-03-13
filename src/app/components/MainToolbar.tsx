@@ -139,6 +139,13 @@ export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUn
       {/* Canvas-only Drawing Tools */}
       {activeView === 'simulation' && (
         <>
+          <ToolButton title="Run Simulation (F5)" onClick={() => onSimulate && onSimulate()} darkMode={dm}>
+            <Play size={14} style={{ color: dm ? '#73C991' : '#2e7d32' }} />
+            <span className="text-[12px] font-medium" style={{ color: dm ? '#73C991' : '#2e7d32' }}>{isSimulating ? 'Stop' : 'Simulate'}</span>
+          </ToolButton>
+
+          <Separator darkMode={dm} />
+
           <ToolButton
             tool="select"
             activeTool={activeTool}
