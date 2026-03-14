@@ -27,6 +27,8 @@ interface SidebarProps {
   openTabs: OpenTab[];
   activeTabId: string | null;
   onOpenFile: (node: FileNode) => void;
+  fileTree: FileNode[]; // ADDED for dynamic files
+  setFileTree: (tree: FileNode[]) => void; // ADDED for dynamic files
   darkMode?: boolean;
 }
 
@@ -47,6 +49,8 @@ function FileTreeNode({
     h: "#569CD6",
     cpp: "#CE9178",
     md: "#85C1E9",
+    S: "#C586C0",
+    asm: "#C586C0",
   };
 
   if (node.type === "folder") {
@@ -95,7 +99,47 @@ function FileTreeNode({
   );
 }
 
-function ExplorerPanel({ onOpen }: { onOpen: (node: FileNode) => void }) {
+function ExplorerPanel({ 
+  onOpen, 
+  fileTree, 
+  setFileTree 
+}: { 
+  onOpen: (node: FileNode) => void;
+  fileTree: FileNode[];
+  setFileTree: (tree: FileNode[]) => void;
+}) {
+  const [isCreatingFile, setIsCreatingFile] = useState(false);
+  const [newFileName, setNewFileName] = useState("");
+
+  const handleCreateFile = () => {
+    if (!newFileName) {
+      setIsCreatingFile(false);
+      return;
+    }
+    
+    // Rudimentary file extension extraction
+    const ext = newFileName.includes('.') ? newFileName.split('.').pop()! : 'ino';
+    
+    const newNode: FileNode = {
+      id: `file-${Date.now()}`,
+      name: newFileName,
+      type: "file",
+      extension: ext,
+      content: `// ${newFileName}\n`
+    };
+
+    const newTree = [...fileTree];
+    if (newTree[0] && newTree[0].children && newTree[0].children[0] && newTree[0].children[0].type === 'folder') {
+      newTree[0].children[0].children = [...(newTree[0].children[0].children || []), newNode];
+    } else if (newTree[0] && newTree[0].children) {
+      newTree[0].children = [...newTree[0].children, newNode];
+    }
+    setFileTree(newTree);
+    onOpen(newNode);
+    setNewFileName("");
+    setIsCreatingFile(false);
+  };
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div
@@ -107,6 +151,7 @@ function ExplorerPanel({ onOpen }: { onOpen: (node: FileNode) => void }) {
         </span>
         <div className="flex items-center gap-1">
           <button
+            onClick={() => setIsCreatingFile(true)}
             className="flex items-center justify-center rounded hover:bg-[#3c3c3c]"
             style={{ width: "20px", height: "20px", color: "#858585" }}
             title="New File"
@@ -123,6 +168,23 @@ function ExplorerPanel({ onOpen }: { onOpen: (node: FileNode) => void }) {
         </div>
       </div>
       <div className="overflow-y-auto flex-1" style={{ scrollbarWidth: "thin", scrollbarColor: "#424242 transparent" }}>
+        {isCreatingFile && (
+          <div className="px-3 py-1 flex items-center gap-2" style={{ background: "#2a2d2e" }}>
+            <File size={14} style={{ color: "#858585" }} />
+            <input
+              autoFocus
+              value={newFileName}
+              onChange={(e) => setNewFileName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreateFile();
+                if (e.key === "Escape") setIsCreatingFile(false);
+              }}
+              onBlur={handleCreateFile}
+              className="bg-transparent border-none outline-none text-[13px] text-[#cccccc] w-full"
+              placeholder="filename.ino"
+            />
+          </div>
+        )}
         {fileTree.map((node) => (
           <FileTreeNode key={node.id} node={node} depth={0} onOpen={onOpen} />
         ))}
@@ -372,7 +434,7 @@ function BoardManagerPanel() {
   );
 }
 
-export function Sidebar({ panel, openTabs, activeTabId, onOpenFile, darkMode = true }: SidebarProps) {
+export function Sidebar({ panel, openTabs, activeTabId, onOpenFile, fileTree, setFileTree, darkMode = true }: SidebarProps) {
   const dm = darkMode;
   return (
     <div
@@ -383,7 +445,7 @@ export function Sidebar({ panel, openTabs, activeTabId, onOpenFile, darkMode = t
         color: dm ? "#cccccc" : "#333333",
       }}
     >
-      {panel === "explorer" && <ExplorerPanel onOpen={onOpenFile} />}
+      {panel === "explorer" && <ExplorerPanel onOpen={onOpenFile} fileTree={fileTree} setFileTree={setFileTree} />}
       {panel === "search" && <SearchPanel />}
       {panel === "source-control" && <SourceControlPanel />}
       {panel === "extensions" && <LibrariesPanel />}

@@ -6,6 +6,8 @@ const KEYWORDS = new Set([
   "if", "else", "for", "while", "do", "switch", "case", "break", "continue",
   "return", "new", "delete", "class", "struct", "typedef", "enum",
   "public", "private", "protected", "String", "array", "sizeof",
+  // Assembly keywords
+  "mov", "ldi", "add", "sub", "mul", "jmp", "call", "ret", "push", "pop", "lsl", "lsr",
 ]);
 
 const CONSTANTS = new Set([

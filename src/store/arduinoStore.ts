@@ -31,12 +31,15 @@ interface ArduinoStore {
     outputLog: OutputLine[];
     consoleOpen: boolean;
 
+    // Last compiled hex for simulation
+    lastCompiledHex: string | null;
+
     // Actions
     setSelectedBoard: (board: ArduinoBoard) => void;
     setSelectedPort: (port: string) => void;
     refreshPorts: () => Promise<void>;
-    compile: (code: string) => Promise<boolean>;
-    upload: (code: string) => Promise<boolean>;
+    compile: (files: string | { name: string; content: string }[]) => Promise<boolean>;
+    upload: (files: string | { name: string; content: string }[]) => Promise<boolean>;
     clearLog: () => void;
     addLog: (text: string, type: OutputLine["type"]) => void;
     toggleConsole: () => void;
@@ -54,6 +57,8 @@ export const useArduinoStore = create<ArduinoStore>((set, get) => ({
     portsLoading: false,
     outputLog: [],
     consoleOpen: false,
+
+    lastCompiledHex: null,
 
     setSelectedBoard: (board) => set({ selectedBoard: board }),
     setSelectedPort: (port) => set({ selectedPort: port }),
@@ -99,7 +104,7 @@ export const useArduinoStore = create<ArduinoStore>((set, get) => ({
         }
     },
 
-    compile: async (code: string): Promise<boolean> => {
+    compile: async (files: string | { name: string; content: string }[]): Promise<boolean> => {
         const { selectedBoard } = get();
         set({ compileStatus: "running", consoleOpen: true });
 
@@ -109,17 +114,17 @@ export const useArduinoStore = create<ArduinoStore>((set, get) => ({
         addLines(`⚙ Compiling for ${selectedBoard.name} (${selectedBoard.fqbn})…`, "info");
 
         try {
-            const res = await compileSketch(code, selectedBoard.fqbn);
+            const res = await compileSketch(files, selectedBoard.fqbn);
             if (res.output) addLines(res.output, "stdout");
             if (res.error) addLines(res.error, "stderr");
 
             if (res.success) {
                 addLines("✓ Compiled successfully.", "success");
-                set({ compileStatus: "success" });
+                set({ compileStatus: "success", lastCompiledHex: res.hex || null });
                 return true;
             } else {
                 addLines("✗ Compilation failed.", "stderr");
-                set({ compileStatus: "error" });
+                set({ compileStatus: "error", lastCompiledHex: null });
                 return false;
             }
         } catch (err) {
@@ -130,7 +135,7 @@ export const useArduinoStore = create<ArduinoStore>((set, get) => ({
         }
     },
 
-    upload: async (code: string): Promise<boolean> => {
+    upload: async (files: string | { name: string; content: string }[]): Promise<boolean> => {
         const { selectedBoard, selectedPort } = get();
         set({ uploadStatus: "running", consoleOpen: true });
 
@@ -149,7 +154,7 @@ export const useArduinoStore = create<ArduinoStore>((set, get) => ({
         );
 
         try {
-            const res = await uploadSketch(code, selectedBoard.fqbn, selectedPort);
+            const res = await uploadSketch(files, selectedBoard.fqbn, selectedPort);
             if (res.output) addLines(res.output, "stdout");
             if (res.error) addLines(res.error, "stderr");
 

@@ -4,13 +4,15 @@ import { MainToolbar } from './components/MainToolbar';
 import { ComponentPanel } from './components/ComponentPanel';
 import { CircuitCanvas, PlacedComponent, Wire } from './components/CircuitCanvas';
 import { AIPanel, ChatMessage } from './components/AIPanel';
-import { FilePanel, FileEntry } from './components/FilePanel';
 import { StatusBar } from './components/StatusBar';
 import { compileSketch } from '../api/arduino';
 // Code Editor imports
 import { Editor } from './components/arduino-ide/Editor';
 import { BottomPanel } from './components/arduino-ide/BottomPanel';
+import { Sidebar } from './components/arduino-ide/Sidebar';
 import ArduinoToolbar from '../components/arduino/ArduinoToolbar';
+import JSZip from 'jszip';
+import html2canvas from 'html2canvas';
 import {
   FileNode,
   OpenTab,
@@ -71,14 +73,28 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [coordinates, setCoordinates] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(false);
-  const [filePanelCollapsed, setFilePanelCollapsed] = useState(false);
-  const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
-  const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const aiResponseIdx = useRef(0);
   const [showGrid, setShowGrid] = useState(true);
-  const [darkMode, setDarkMode] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  
+  // Dynamic file tree for the IDE sidebar
+  const [ideFileTree, setIdeFileTree] = useState<FileNode[]>([{
+    id: "workspace",
+    name: "WORKSPACE",
+    type: "folder",
+    children: [
+      {
+        id: "default-project",
+        name: "MyProject",
+        type: "folder",
+        children: [
+          { id: "blink-ino", name: "Blink.ino", type: "file", extension: "ino", content: blinkCode },
+        ],
+      }
+    ]
+  }]);
 
   // ── Clipboard for multi-component copy/paste ────────────────────────────
   const [clipboard, setClipboard] = useState<{ components: PlacedComponent[]; wires: Wire[] } | null>(null);
@@ -152,6 +168,27 @@ export default function App() {
     );
   }, []);
 
+  // Helper to get all files from the ideFileTree
+  const getAllFiles = useCallback(() => {
+    const files: { name: string; content: string }[] = [];
+    const traverse = (nodes: FileNode[]) => {
+      nodes.forEach(node => {
+        if (node.type === 'file') {
+          // Check if it's currently open and dirty in codeTabs
+          const tab = codeTabs.find(t => t.id === node.id);
+          files.push({
+            name: node.name,
+            content: tab ? tab.content : (node.content || '')
+          });
+        } else if (node.type === 'folder' && node.children) {
+          traverse(node.children);
+        }
+      });
+    };
+    traverse(ideFileTree);
+    return files;
+  }, [ideFileTree, codeTabs]);
+
   // ── Verify using real Arduino backend when available ─────────
   const handleVerify = useCallback(() => {
     if (arduinoStore.compileStatus === 'running' || arduinoStore.uploadStatus === 'running') return;
@@ -159,11 +196,9 @@ export default function App() {
     setBottomVisible(true);
     setBottomTab('output');
 
-    const activeTab = codeTabs.find((t) => t.id === codeActiveTabId);
-    const code = activeTab?.content || '';
-
-    arduinoStore.compile(code);
-  }, [codeTabs, codeActiveTabId, arduinoStore]);
+    const files = getAllFiles();
+    arduinoStore.compile(files);
+  }, [getAllFiles, arduinoStore]);
 
   // ── Upload using real Arduino backend when available ────────────────────
   const handleUpload = useCallback(() => {
@@ -172,11 +207,9 @@ export default function App() {
     setBottomVisible(true);
     setBottomTab('output');
 
-    const activeTab = codeTabs.find((t) => t.id === codeActiveTabId);
-    const code = activeTab?.content || '';
-
-    arduinoStore.upload(code);
-  }, [codeTabs, codeActiveTabId, arduinoStore]);
+    const files = getAllFiles();
+    arduinoStore.upload(files);
+  }, [getAllFiles, arduinoStore]);
 
   // ── Simulation with connection validation ───────────────────────────────
   const [simError, setSimError] = useState<string | null>(null);
@@ -291,11 +324,12 @@ export default function App() {
     // --- MCU present — compile and start ---
     setStatusMessage('Compiling sketch for simulation...');
 
-    // Get the active code
-    const activeTab = codeTabs.find(t => t.id === codeActiveTabId);
-    const code = activeTab?.content || '';
-    if (!code.trim()) {
-      const msg = '⚠ Not connected — No code to simulate. Write or open an Arduino sketch first';
+    // Get all files from the workspace (for multi-file project support)
+    const files = getAllFiles();
+    
+    // Check if there is at least one .ino file (arduino-cli requirement)
+    if (!files.some(f => f.name.endsWith('.ino'))) {
+      const msg = '⚠ Not connected — No .ino file found in project. Please create one first.';
       setStatusMessage(msg);
       setSimError(msg);
       arduinoStore.addLog(msg, 'error');
@@ -305,18 +339,16 @@ export default function App() {
     arduinoStore.addLog('● Compiling sketch...', 'info');
 
     try {
-      const result = await arduinoStore.compile(code);
-      if (result) {
-        // Try to get compiled hex from the arduino store
-        const hexResult = await compileSketch(code, 'arduino:avr:uno').catch(() => null);
-
-        if (hexResult?.hex) {
-          simulationStore.startSimulation(hexResult.hex);
+      const success = await arduinoStore.compile(files);
+      if (success) {
+        const hex = arduinoStore.lastCompiledHex;
+        if (hex) {
+          simulationStore.startSimulation(hex);
           arduinoStore.addLog('✓ Compilation successful', 'success');
           arduinoStore.addLog('▶ Simulation started (AVR @ 16MHz)', 'success');
           setStatusMessage('● Simulation running (AVR @ 16MHz)');
         } else {
-          // Compilation server may not return hex — try direct simulation start
+          // Compilation server may not return hex — start visual-only
           simulationStore.startSimulation('');
           arduinoStore.addLog('⚠ Compile server did not return .hex — using mock simulation', 'warning');
           arduinoStore.addLog('▶ Simulation started in visual-only mode', 'success');
@@ -460,6 +492,128 @@ export default function App() {
     }, 900);
   }, []);
 
+  // ── AI Visual QA (Multimodal Gemini Vision) ─────────────────────────────
+  const handleVisualQA = useCallback(async (prompt: string) => {
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsg: ChatMessage = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: `📷 [Screenshot Attached]\n${prompt}`,
+      timestamp: now,
+    };
+    setMessages(prev => [...prev, userMsg]);
+
+    try {
+      const el = document.getElementById('circuit-canvas-container');
+      if (!el) throw new Error('Could not find circuit canvas');
+      
+      setStatusMessage('Taking snapshot for Gemini Vision...');
+      
+      // html2canvas requires the element to be in the DOM and visible.
+      // foreignObjects (if any) can be tricky, but this captures the rendered HTML.
+      const canvas = await html2canvas(el, {
+         backgroundColor: darkMode ? '#1e1e1e' : '#ffffff',
+         scale: 1, // keep it relatively small for the API
+      });
+      
+      const base64Full = canvas.toDataURL('image/jpeg', 0.8);
+      // Remove prefix "data:image/jpeg;base64,"
+      const base64Data = base64Full.split(',')[1];
+      
+      setStatusMessage('Analyzing circuit with Gemini 1.5 Flash...');
+      
+      const response = await fetch('/api/ai/vision', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ image: base64Data, prompt })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setMessages(prev => [...prev, {
+          id: `a-${Date.now()}`,
+          role: 'ai',
+          content: result.analysis,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isCode: result.analysis.includes('```') // Very basic code detection
+        }]);
+        executeAIActions(result.analysis);
+        setStatusMessage('AI Analysis complete');
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setMessages(prev => [...prev, {
+        id: `a-${Date.now()}`,
+        role: 'ai',
+        content: `Error analyzing circuit: ${err.message}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }]);
+      setStatusMessage('AI Analysis failed');
+    }
+  }, [darkMode]);
+
+  const executeAIActions = useCallback((content: string) => {
+    try {
+      const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/{[\s\S]*}/);
+      if (!jsonMatch) return;
+      
+      const data = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+      if (!data.actions || !Array.isArray(data.actions)) return;
+
+      data.actions.forEach((action: any) => {
+        switch (action.type) {
+          case 'PLACE_COMPONENT': {
+            const newComp: PlacedComponent = {
+              id: `${action.componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+              type: action.componentType,
+              x: action.x || 100,
+              y: action.y || 100,
+              label: action.label || action.componentType.toUpperCase(),
+              selected: false,
+              rotation: 0,
+              attrs: action.properties || {},
+            };
+            setComponents(prev => [...prev, newComp]);
+            setStatusMessage(`AI placed ${action.componentType}`);
+            break;
+          }
+          case 'ADD_WIRE': {
+            const [fromId, fromPinName] = action.from.split(':');
+            const [toId, toPinName] = action.to.split(':');
+            if (fromId && toId) {
+              const newWire: Wire = {
+                id: `w-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+                fromComponentId: fromId,
+                fromPinName: fromPinName || 'in-0',
+                toComponentId: toId,
+                toPinName: toPinName || 'out-0',
+                color: 'red',
+              };
+              setWiresState(prev => [...prev, newWire]);
+              setStatusMessage('AI added a wire');
+            }
+            break;
+          }
+          case 'START_SIMULATION':
+            handleSimulate();
+            break;
+          case 'STOP_SIMULATION':
+            simulationStore.stopSimulation();
+            break;
+          default:
+            console.warn('Unknown AI action:', action.type);
+        }
+      });
+    } catch (e) {
+      console.error('Failed to execute AI actions:', e);
+    }
+  }, [handleSimulate, simulationStore]);
+
   // ── Copy / Paste ────────────────────────────────────────────────────────
   const handleCopy = useCallback(() => {
     const selected = components.filter(c => c.selected);
@@ -577,6 +731,43 @@ export default function App() {
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 100);
         setStatusMessage('Project saved as...');
+        break;
+      }
+      case 'Export Project as ZIP...': {
+        const zip = new JSZip();
+        
+        // 1. Add circuit JSON
+        const circuitData = JSON.stringify({ components, wires: wiresState }, null, 2);
+        zip.file("circuit-project.json", circuitData);
+        
+        // 2. Add all code files from ideFileTree recursively
+        const addFilesToZip = (folder: JSZip, nodes: FileNode[]) => {
+          nodes.forEach(node => {
+            if (node.type === "file") {
+               // Find latest content from codeTabs if it's currently open
+               const activeTab = codeTabs.find(t => t.id === node.id);
+               const content = activeTab ? activeTab.content : (node.content || "");
+               folder.file(node.name, content);
+            } else if (node.type === "folder" && node.children) {
+               const subFolder = folder.folder(node.name);
+               if (subFolder) addFilesToZip(subFolder, node.children);
+            }
+          });
+        };
+        addFilesToZip(zip, ideFileTree);
+        
+        // 3. Generate and download
+        zip.generateAsync({ type: "blob" }).then(function(content) {
+          const url = URL.createObjectURL(content);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'simuide-project.zip';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 100);
+          setStatusMessage('Project exported as ZIP');
+        });
         break;
       }
       case 'Export Schematic (PDF)...': {
@@ -868,27 +1059,16 @@ export default function App() {
 
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">
-        {/* File panel: only visible in code-editor mode */}
+        {/* Sidebar: only visible in code-editor mode */}
         {activeView === 'code-editor' && (
-          <FilePanel
-            collapsed={filePanelCollapsed}
-            onToggleCollapse={() => setFilePanelCollapsed(c => !c)}
-            entries={fileEntries}
-            onAddEntries={(newEntries) => setFileEntries(prev => [...prev, ...newEntries])}
-            onRemoveEntry={(id) => {
-              const removeById = (entries: FileEntry[]): FileEntry[] =>
-                entries.filter(e => e.id !== id).map(e =>
-                  e.children ? { ...e, children: removeById(e.children) } : e
-                );
-              setFileEntries(prev => removeById(prev));
-              if (activeFileId === id) setActiveFileId(null);
-            }}
-            onOpenFile={(file) => {
-              setActiveFileId(file.id);
-              setStatusMessage(`Opened ${file.name}`);
-            }}
-            activeFileId={activeFileId}
-            darkMode={darkMode}
+          <Sidebar 
+            panel="explorer" 
+            openTabs={codeTabs} 
+            activeTabId={codeActiveTabId} 
+            onOpenFile={handleOpenFile} 
+            fileTree={ideFileTree}
+            setFileTree={setIdeFileTree}
+            darkMode={darkMode} 
           />
         )}
         {/* Component panel: only visible in simulation mode */}
@@ -970,6 +1150,7 @@ export default function App() {
         <AIPanel
           messages={messages}
           onSendMessage={handleSendMessage}
+          onVisualQA={handleVisualQA}
           onBuild={handleVerify}
           collapsed={aiPanelCollapsed}
           onToggleCollapse={() => setAiPanelCollapsed(c => !c)}

@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Send, ChevronRight, Bot, User, Code2,
-  Zap, Clipboard, RotateCcw, PanelRightClose, PanelRightOpen
+  Zap, Clipboard, RotateCcw, PanelRightClose, PanelRightOpen,
+  Camera
 } from 'lucide-react';
 
 export interface ChatMessage {
@@ -15,6 +16,7 @@ export interface ChatMessage {
 interface AIPanelProps {
   messages: ChatMessage[];
   onSendMessage: (content: string) => void;
+  onVisualQA?: (prompt: string) => void;
   onBuild?: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
@@ -37,7 +39,7 @@ const geminiModels = [
   { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite', tag: 'Stable' },
 ];
 
-export function AIPanel({ messages, onSendMessage, onBuild, collapsed, onToggleCollapse, darkMode }: AIPanelProps) {
+export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, collapsed, onToggleCollapse, darkMode }: AIPanelProps) {
   const dm = darkMode;
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -222,6 +224,16 @@ export function AIPanel({ messages, onSendMessage, onBuild, collapsed, onToggleC
       {/* Input area */}
       <div className={`border-t px-2.5 pt-2.5 pb-2.5 shrink-0 ${dm ? 'border-[#333] bg-[#252525]' : 'border-[#d4d4d4] bg-[#f5f5f7]'}`}>
         <div className={`flex items-end gap-2 border rounded-lg px-3 py-2 focus-within:border-[#4285f4] focus-within:shadow-[0_0_0_2px_rgba(66,133,244,0.12)] transition-all duration-150 ${dm ? 'bg-[#2a2a2a] border-[#444]' : 'bg-white border-[#c8c8c8]'}`}>
+          <button
+            onClick={() => {
+               if (onVisualQA) onVisualQA(input.trim() || "Please analyze this circuit.");
+               setInput("");
+            }}
+            title="Analyze screenshot of circuit with Gemini"
+            className={`shrink-0 flex items-center justify-center p-1.5 rounded-md transition-colors duration-150 ${dm ? 'text-[#888] hover:text-[#fff] hover:bg-[#444]' : 'text-[#888] hover:text-[#333] hover:bg-[#e8e8e8]'}`}
+          >
+            <Camera size={14} />
+          </button>
           <textarea
             ref={inputRef}
             rows={1}

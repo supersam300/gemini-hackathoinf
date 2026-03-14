@@ -12,7 +12,7 @@ SimuIDE Web is a browser-based Arduino circuit simulator and IDE built with **Re
 ┌───────────────────────────────────────────────────────────┐
 │                  React UI Components                      │
 │  MenuBar · MainToolbar · CircuitCanvas · ComponentPanel   │
-│  AIPanel · FilePanel · Editor · BottomPanel · StatusBar   │
+│  AIPanel · Sidebar · Editor · BottomPanel · StatusBar    │
 ├───────────────────────────────────────────────────────────┤
 │                 Zustand State Stores                      │
 │  projectStore · diagramStore · editorStore                │
@@ -37,10 +37,9 @@ src/
 ├── app/
 │   ├── App.tsx                        # Main integrated component (dual-view)
 │   └── components/
-│       ├── AIPanel.tsx                # Gemini AI chat panel
+│       ├── AIPanel.tsx                # Gemini AI chat panel (Vision QA support)
 │       ├── CircuitCanvas.tsx          # SVG schematic canvas + Wokwi elements
 │       ├── ComponentPanel.tsx         # Component library sidebar
-│       ├── FilePanel.tsx              # File explorer / importer
 │       ├── MainToolbar.tsx            # Canvas tools & actions
 │       ├── MenuBar.tsx                # Menu system (File, Edit, View, etc.)
 │       ├── StatusBar.tsx              # Status line (zoom, coordinates, count)
@@ -121,13 +120,13 @@ src/
 |-----------|------|---------|
 | **CircuitCanvas** | `app/components/CircuitCanvas.tsx` | SVG-based schematic canvas. Renders Wokwi web components (`<wokwi-led>`, `<wokwi-resistor>`, etc.). Supports drag-and-drop placement, pin-snap wiring (`SNAP_THRESHOLD = 20px`), zoom/pan, component property editing, and breadboard support. ~1350 lines. |
 | **ComponentPanel** | `app/components/ComponentPanel.tsx` | Categorized component library (Basic, ICs, Display, Sensors, Actuators, Modules) with search and favorites. Drag a component to select it for placement. |
-| **FilePanel** | `app/components/FilePanel.tsx` | File browser with folder tree, file upload, and search. Supports import/export of project files. |
+| **Sidebar** | `app/components/arduino-ide/Sidebar.tsx` | IDE-style file explorer with dynamic file creation support and folder tree. Replaces the legacy FilePanel. |
 
 ### AI Assistant
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| **AIPanel** | `app/components/AIPanel.tsx` | Collapsible Gemini AI chat panel. Model selector, suggested prompts, message history. Currently uses placeholder responses — wire to Gemini API for production. |
+| **AIPanel** | `app/components/AIPanel.tsx` | Collapsible Gemini AI chat panel. Supports standard chat and **Visual QA** mode (using `html2canvas` and Gemini 1.5 Flash) for multimodal circuit analysis. |
 
 ### Arduino IDE (Code Editor View)
 

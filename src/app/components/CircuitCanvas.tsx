@@ -1586,6 +1586,7 @@ export function CircuitCanvas({
       )}
       {/* SVG Canvas */}
       <div
+        id="circuit-canvas-container"
         ref={containerRef}
         className={`flex-1 overflow-hidden relative ${cursorClass}`}
         onMouseMove={handleMouseMove}

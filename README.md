@@ -1,16 +1,18 @@
-# SimuIDE Web
+# SimuIDE Web - UI Navigator ☸️
 
-A web-based circuit simulator and IDE similar to Wokwi. Drag and drop electronic components, design complex circuits, code your microcontrollers in C/C++, and simulate everything directly in the browser.
+A powerful, multimodal AI-powered circuit simulator and IDE. Drag and drop electronic components, design complex circuits, code your microcontrollers in C/C++, and simulate everything directly in the browser with the help of a Gemini-powered Visual UI Agent.
 
-## Features
+## Core Focus: Visual UI Understanding & Interaction
 
-- **Interactive Circuit Canvas:** Drag, drop, and wire components on a dynamic grid.
-- **Microcontroller Support:** Simulate Arduino Uno, Nano, Mega, and ESP32 boards.
-- **Extensive Component Library:** Includes LEDs, resistors, capacitors, displays (LCD, 7-segment, OLED), sensors (DHT22, PIR, Ultrasonic), motors (Servo, Stepper), and more.
-- **Integrated Code Editor:** Built-in Monaco editor with syntax highlighting for C/C++ (Arduino sketches).
-- **Simulation Engine:** Powered by `avr8js` for accurate AVR microcontroller simulation.
-- **AI Assistant Pipeline:** Integrated Gemini AI chat for coding help and circuit analysis.
-- **Project Management:** Save and load projects locally (`.json`) or sync them to the cloud.
+Build and test circuits with an agent that becomes your "hands on screen". The integrated Gemini agent observes the browser display, interprets visual elements (with or without relying on APIs or DOM access), and performs actions based on your intent.
+
+## Key Features
+
+- **Interactive Circuit Canvas:** Dynamic SVG-based grid for precision component placement and wiring.
+- **Visual Gemini AI Agent:** Multimodal Visual QA agent that captures screenshots of your circuit and uses Gemini 1.5 Flash to debug wiring, suggest improvements, and execute canvas actions.
+- **Advanced IDE Features:** Dynamic multi-file support (create `.ino`, `.cpp`, `.h` files) and project export as ZIP (includes all code and circuit data).
+- **Simultaneous Simulation:** Real-time AVR simulation for Arduino (Uno, Nano, Mega) and ESP32 boards powered by `avr8js`.
+- **Cloud Connectivity:** Seamlessly sync projects to MongoDB Atlas with semantic search capabilities.
 
 ## Getting Started
 
@@ -36,12 +38,33 @@ npm run dev:full
 
 ## Technology Stack
 
-- **Frontend:** React 18, TypeScript, Vite
-- **Styling:** Tailwind CSS
-- **State Management:** Zustand
-- **Code Editor:** Monaco Editor (`@monaco-editor/react`)
-- **Simulation Engine:** AVR8js
-- **Canvas / Components:** Custom SVG rendering & `@wokwi/elements` custom elements
+- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS
+- **AI Engine:** Google Gemini (Multimodal & Embeddings) via Google GenAI SDK
+- **Backend:** Node.js, Express, MongoDB Atlas
+- **Simulation:** AVR8js (AVR CPU Simulator)
+- **Canvas:** custom SVG rendering & `@wokwi/elements` 
+- **Cloud Hosting:** Optimized for Google Cloud Run
+
+## Project Structure
+
+```text
+.
+├── server/                     # Express Backend
+│   ├── index.js                # Server entry point & static file serving
+│   ├── routes/                 # API Routes (AI, Arduino, Circuits)
+│   ├── services/               # Core logic (Gemini integration)
+│   └── models/                 # MongoDB Schemas (Circuit, Document)
+├── src/                        # React Frontend
+│   ├── app/                    # Main application logic
+│   │   ├── components/         # UI Components (Canvas, AI Panel, Menu)
+│   │   └── components/arduino-ide/ # Complex IDE sub-system
+│   ├── store/                  # Zustand state management
+│   ├── api/                    # Frontend API clients
+│   └── main.tsx                # Frontend entry point
+├── Dockerfile                  # Production build script
+├── docker-compose.yml          # Local container orchestration
+└── README.md                   # You are here
+```
 
 ## Documentation
 
@@ -51,6 +74,21 @@ Detailed documentation about specific parts of the project can be found in the f
 - [`PROJECT_STRUCTURE.md`](./PROJECT_STRUCTURE.md) - Overview of the directory layout and initial sprint framework.
 - [`DOCKER.md`](./DOCKER.md) - Containerization instructions and deployment setups.
 - [`MONGODB_EXPORT.md`](./MONGODB_EXPORT.md) - Database schema and data export documentation.
+
+## Deployment to Google Cloud
+
+This project is optimized for deployment on **Google Cloud Platform (GCP)**.
+
+### 1. Google Cloud Run (Containerized Backend + Frontend)
+The `Dockerfile` is configured to build the frontend and serve it alongside the Node.js backend.
+- Build the image: `gcloud builds submit --tag gcr.io/[PROJECT_ID]/simuide`
+- Deploy to Cloud Run: `gcloud run deploy simuide --image gcr.io/[PROJECT_ID]/simuide --platform managed`
+
+### 2. Environment Variables
+Ensure the following variables are set in your Cloud Run environment:
+- `GEMINI_API_KEY`: Your Google Gemini API key.
+- `MONGODB_URI`: Connection string for your MongoDB Atlas cluster.
+- `NODE_ENV`: `production`
 
 ## Contributing
 

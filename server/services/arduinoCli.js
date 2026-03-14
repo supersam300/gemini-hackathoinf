@@ -39,24 +39,40 @@ function runArduinoCli(args, opts = {}) {
 }
 
 /**
- * Write sketch code to a temporary directory and return the sketch dir path.
+ * Write sketch files to a temporary directory and return the sketch dir path.
  * arduino-cli requires the .ino file to be inside a folder with the same name.
+ * files: [{ name: string, content: string }]
  */
-function writeSketch(code) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "simulide-sketch-"));
-    const sketchName = path.basename(dir);
-    const sketchFile = path.join(dir, `${sketchName}.ino`);
-    fs.writeFileSync(sketchFile, code, "utf-8");
-    return dir;
+function writeSketch(files) {
+    const tempBaseDir = fs.mkdtempSync(path.join(os.tmpdir(), "simulide-sketch-"));
+    
+    // Find the main .ino file
+    const mainIno = files.find(f => f.name.endsWith(".ino"));
+    if (!mainIno) {
+        // If no .ino, create a dummy one based on project name or just fail gracefully
+        // For now, let's assume there's at least one .ino as per user request
+        throw new Error("No .ino file found in the project.");
+    }
+
+    const sketchName = path.basename(mainIno.name, ".ino");
+    const sketchDir = path.join(tempBaseDir, sketchName);
+    fs.mkdirSync(sketchDir, { recursive: true });
+    
+    files.forEach(file => {
+        const filePath = path.join(sketchDir, file.name);
+        fs.writeFileSync(filePath, file.content, "utf-8");
+    });
+
+    return sketchDir;
 }
 
 /**
  * Compile a sketch.
- * @param {string} code   - Arduino sketch source code
+ * @param {Array} files   - Array of objects { name, content }
  * @param {string} fqbn   - Fully Qualified Board Name (e.g. "arduino:avr:uno")
  */
-async function compileSketch(code, fqbn) {
-    const sketchDir = writeSketch(code);
+async function compileSketch(files, fqbn) {
+    const sketchDir = writeSketch(files);
     try {
         const result = await runArduinoCli([
             "compile",
@@ -71,8 +87,8 @@ async function compileSketch(code, fqbn) {
         let hex = null;
         if (result.success) {
             try {
-                const files = fs.readdirSync(sketchDir);
-                const hexFile = files.find((f) => f.endsWith(".hex"));
+                const dirFiles = fs.readdirSync(sketchDir);
+                const hexFile = dirFiles.find((f) => f.endsWith(".hex"));
                 if (hexFile) {
                     hex = fs.readFileSync(path.join(sketchDir, hexFile), "utf-8");
                 }
@@ -89,12 +105,12 @@ async function compileSketch(code, fqbn) {
 
 /**
  * Compile and upload a sketch.
- * @param {string} code   - Arduino sketch source code
+ * @param {Array} files   - Array of objects { name, content }
  * @param {string} fqbn   - Fully Qualified Board Name
  * @param {string} port   - Serial port (e.g. /dev/cu.usbmodem14101)
  */
-async function uploadSketch(code, fqbn, port) {
-    const sketchDir = writeSketch(code);
+async function uploadSketch(files, fqbn, port) {
+    const sketchDir = writeSketch(files);
     try {
         // First compile
         const compileResult = await runArduinoCli([

@@ -1,23 +1,40 @@
 require("express-async-errors");
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const connectDB = require("./db");
 const arduinoRoutes = require("./routes/arduino");
 const circuitRoutes = require("./routes/circuits");
+const aiRoutes = require("./routes/ai");
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 // ─── Middleware ─────────────────────────────────────────────
 app.use(cors({ origin: "*" }));
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "10mb" }));
 
 // ─── Routes ─────────────────────────────────────────────────
 app.use("/api/arduino", arduinoRoutes);
 app.use("/api/circuits", circuitRoutes);
+app.use("/api/ai", aiRoutes);
 
 // ─── Health check ────────────────────────────────────────────
 app.get("/health", (_req, res) => res.json({ ok: true }));
+
+// ─── Serve Static Files (Production) ──────────────────────────
+if (process.env.NODE_ENV === "production") {
+    const distPath = path.join(__dirname, "../dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+        // Only serve index.html for non-API routes
+        if (!req.path.startsWith("/api/")) {
+            res.sendFile(path.join(distPath, "index.html"));
+        } else {
+            res.status(404).json({ success: false, error: "API route not found" });
+        }
+    });
+}
 
 // ─── Error handler ───────────────────────────────────────────
 app.use((err, _req, res, _next) => {
@@ -37,5 +54,8 @@ connectDB().then(() => {
         console.log(`     POST /api/circuits`);
         console.log(`     GET  /api/circuits/:id`);
         console.log(`     DEL  /api/circuits/:id`);
+        console.log(`     POST /api/ai/ingest`);
+        console.log(`     POST /api/ai/search`);
+        console.log(`     POST /api/ai/vision`);
     });
 });

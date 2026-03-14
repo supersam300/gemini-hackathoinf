@@ -13,7 +13,7 @@ export default defineConfig({
     proxy: {
       // Forward /api requests to the Arduino backend server
       "/api": {
-        target: "http://localhost:3001",
+        target: "http://localhost:3000",
         changeOrigin: true,
       },
     },

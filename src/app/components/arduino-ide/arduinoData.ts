@@ -209,16 +209,22 @@ export const fileTree: FileNode[] = [
     name: "LIBRARIES",
     type: "folder",
     children: [
-      { id: "lib-dht", name: "DHT", type: "folder", children: [
-        { id: "dht-h", name: "DHT.h", type: "file", extension: "h" },
-        { id: "dht-cpp", name: "DHT.cpp", type: "file", extension: "cpp" },
-      ]},
-      { id: "lib-wire", name: "Wire", type: "folder", children: [
-        { id: "wire-h", name: "Wire.h", type: "file", extension: "h" },
-      ]},
-      { id: "lib-servo", name: "Servo", type: "folder", children: [
-        { id: "servo-h", name: "Servo.h", type: "file", extension: "h" },
-      ]},
+      {
+        id: "lib-dht", name: "DHT", type: "folder", children: [
+          { id: "dht-h", name: "DHT.h", type: "file", extension: "h" },
+          { id: "dht-cpp", name: "DHT.cpp", type: "file", extension: "cpp" },
+        ]
+      },
+      {
+        id: "lib-wire", name: "Wire", type: "folder", children: [
+          { id: "wire-h", name: "Wire.h", type: "file", extension: "h" },
+        ]
+      },
+      {
+        id: "lib-servo", name: "Servo", type: "folder", children: [
+          { id: "servo-h", name: "Servo.h", type: "file", extension: "h" },
+        ]
+      },
     ],
   },
 ];

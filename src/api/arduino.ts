@@ -29,27 +29,35 @@ export async function fetchPorts(): Promise<{ success: boolean; ports: ArduinoPo
 
 /** Compile a sketch */
 export async function compileSketch(
-    code: string,
+    files: string | { name: string; content: string }[],
     fqbn: string
 ): Promise<ArduinoApiResponse> {
+    const body = typeof files === "string" 
+        ? JSON.stringify({ code: files, fqbn })
+        : JSON.stringify({ files, fqbn });
+
     const res = await fetch(`${BASE}/compile`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, fqbn }),
+        body,
     });
     return safeJson(res);
 }
 
 /** Compile and upload a sketch to the given port */
 export async function uploadSketch(
-    code: string,
+    files: string | { name: string; content: string }[],
     fqbn: string,
     port: string
 ): Promise<ArduinoApiResponse> {
+    const body = typeof files === "string"
+        ? JSON.stringify({ code: files, fqbn, port })
+        : JSON.stringify({ files, fqbn, port });
+
     const res = await fetch(`${BASE}/upload`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, fqbn, port }),
+        body,
     });
     return safeJson(res);
 }

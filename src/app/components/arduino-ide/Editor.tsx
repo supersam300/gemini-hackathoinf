@@ -17,6 +17,8 @@ const EXT_ICON_COLORS: Record<string, string> = {
   h: "#569CD6",
   cpp: "#CE9178",
   md: "#85C1E9",
+  S: "#C586C0",
+  asm: "#C586C0",
 };
 
 const FONT = "'JetBrains Mono', 'Consolas', 'Courier New', monospace";

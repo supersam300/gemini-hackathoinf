@@ -29,6 +29,8 @@ const menuData: MenuGroup[] = [
       { type: 'separator' },
       { label: 'Save', shortcut: 'Ctrl+S' },
       { label: 'Save As...', shortcut: 'Ctrl+Shift+S' },
+      { type: 'separator' },
+      { label: 'Export Project as ZIP...' },
       { label: 'Export Schematic (PDF)...' },
       { type: 'separator' },
       { label: 'Import Schematic...' },

@@ -37,31 +37,36 @@ router.get("/ports", async (req, res) => {
 
 /**
  * POST /api/arduino/compile
- * Body: { code: string, fqbn: string }
+ * Body: { files: Array, fqbn: string }
  */
 router.post("/compile", async (req, res) => {
-    const { code, fqbn } = req.body;
+    const { files, code, fqbn } = req.body;
 
-    if (!code || typeof code !== "string") {
-        return res.status(400).json({ success: false, error: "code is required" });
+    // Support both single "code" string (backward compat) and "files" array
+    const sketchFiles = files || (code ? [{ name: "sketch.ino", content: code }] : null);
+
+    if (!sketchFiles || !Array.isArray(sketchFiles)) {
+        return res.status(400).json({ success: false, error: "files array is required" });
     }
     if (!fqbn || typeof fqbn !== "string") {
         return res.status(400).json({ success: false, error: "fqbn (board) is required" });
     }
 
-    const result = await compileSketch(code, fqbn);
+    const result = await compileSketch(sketchFiles, fqbn);
     res.json(result);
 });
 
 /**
  * POST /api/arduino/upload
- * Body: { code: string, fqbn: string, port: string }
+ * Body: { files: Array, fqbn: string, port: string }
  */
 router.post("/upload", async (req, res) => {
-    const { code, fqbn, port } = req.body;
+    const { files, code, fqbn, port } = req.body;
 
-    if (!code || typeof code !== "string") {
-        return res.status(400).json({ success: false, error: "code is required" });
+    const sketchFiles = files || (code ? [{ name: "sketch.ino", content: code }] : null);
+
+    if (!sketchFiles || !Array.isArray(sketchFiles)) {
+        return res.status(400).json({ success: false, error: "files array is required" });
     }
     if (!fqbn || typeof fqbn !== "string") {
         return res.status(400).json({ success: false, error: "fqbn (board) is required" });
@@ -70,7 +75,7 @@ router.post("/upload", async (req, res) => {
         return res.status(400).json({ success: false, error: "port is required" });
     }
 
-    const result = await uploadSketch(code, fqbn, port);
+    const result = await uploadSketch(sketchFiles, fqbn, port);
     res.json(result);
 });
 

@@ -3,7 +3,6 @@
 # Stage 1: Build stage
 FROM node:20-alpine AS builder
 
-# Set working directory
 WORKDIR /app
 
 # Copy package.json and package-lock.json
@@ -23,27 +22,30 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install a simple HTTP server to serve the static files
-RUN npm install -g serve
-
 # Install arduino-cli and AVR core
 RUN apk add --no-cache curl \
     && curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh \
     && /bin/arduino-cli core update-index \
     && /bin/arduino-cli core install arduino:avr
 
-# Copy built application from builder stage
+# Copy built application and server code
 COPY --from=builder /app/dist ./dist
+COPY server/ ./server/
+COPY package.json package-lock.json* ./
 
-# Expose port 3000
+# Install only production dependencies
+RUN npm ci --omit=dev
+
+# Expose port (Matches server/index.js default)
 EXPOSE 3000
 
 # Set environment variables
 ENV NODE_ENV=production
+ENV PORT=3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
 
-# Start the application
-CMD ["serve", "-s", "dist", "-l", "3000"]
+# Start the application using the integrated Express server
+CMD ["node", "server/index.js"]
