@@ -62,22 +62,13 @@ router.post("/agent", async (req, res) => {
         }
 
         const scriptPath = path.join(__dirname, "../services/agent.py");
-        // Absolute path to venv python
-        const venvDir = path.join(__dirname, "../venv");
-        const pythonExecutable = path.join(venvDir, "bin/python3");
+        
+        // Use the system python since the venv doesn't exist on this machine
+        const pythonExecutable = "python";
 
         console.log("[POST /api/ai/agent] Spawning python, GEMINI_API_KEY exists?", !!process.env.GEMINI_API_KEY);
 
-        // Replicate 'source venv/bin/activate' by setting relevant env vars
-        const env = {
-            ...process.env,
-            VIRTUAL_ENV: venvDir,
-            PATH: `${path.join(venvDir, "bin")}:${process.env.PATH}`,
-            PYTHONHOME: undefined, // Clear PYTHONHOME so venv is used
-            PYTHONPATH: undefined, // Clear PYTHONPATH to prevent namespace conflicts
-        };
-        delete env.PYTHONHOME;
-        delete env.PYTHONPATH;
+        const env = { ...process.env }; // Just pass standard env which includes GEMINI_API_KEY
 
         const pythonProcess = spawn(pythonExecutable, [scriptPath], { env });
 
@@ -92,6 +83,13 @@ router.post("/agent", async (req, res) => {
             errorData += data.toString();
         });
 
+        pythonProcess.on("error", (error) => {
+            console.error("[POST /api/ai/agent] Failed to spawn python process:", error);
+            if (!res.headersSent) {
+                res.status(500).json({ success: false, error: "Failed to spawn Python process. Is the virtual environment set up correctly?" });
+            }
+        });
+
         // Write the payload to stdin
         pythonProcess.stdin.write(JSON.stringify({ prompt, canvasState: canvasState || {} }));
         pythonProcess.stdin.end();
@@ -100,7 +98,9 @@ router.post("/agent", async (req, res) => {
             if (code !== 0) {
                 console.error("[POST /api/ai/agent] Python script exited with code", code);
                 console.error("Stderr:", errorData);
-                return res.status(500).json({ success: false, error: "Agent process failed" });
+                if (!res.headersSent) {
+                    return res.status(500).json({ success: false, error: "Agent process failed" });
+                }
             }
 
             try {
