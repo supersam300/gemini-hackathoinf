@@ -1,4 +1,4 @@
-# SimuIDE Web - UI Navigator ☸️
+# SimuIDE Web - UI Navigator
 
 A powerful, multimodal AI-powered circuit simulator and IDE. Drag and drop electronic components, design complex circuits, code your microcontrollers in C/C++, and simulate everything directly in the browser with the help of a Gemini-powered Visual UI Agent.
 

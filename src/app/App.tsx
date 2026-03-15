@@ -589,8 +589,11 @@ export default function App() {
       data.actions.forEach((action: any) => {
         switch (action.type) {
           case 'PLACE_COMPONENT': {
+            // Use action.id or action.label as the deterministc ID so wires can connect to it.
+            // Fall back to a random ID if neither is provided.
+            const compId = action.id || action.label || `${action.componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
             const newComp: PlacedComponent = {
-              id: `${action.componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+              id: compId,
               type: action.componentType,
               x: action.x || 100,
               y: action.y || 100,
@@ -604,8 +607,11 @@ export default function App() {
             break;
           }
           case 'ADD_WIRE': {
-            const [fromId, fromPinName] = action.from.split(':');
-            const [toId, toPinName] = action.to.split(':');
+            const fromStr = action.from || action.from1;
+            const toStr = action.to;
+            if (!fromStr || !toStr) break;
+            const [fromId, fromPinName] = fromStr.split(':');
+            const [toId, toPinName] = toStr.split(':');
             if (fromId && toId) {
               const newWire: Wire = {
                 id: `w-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,

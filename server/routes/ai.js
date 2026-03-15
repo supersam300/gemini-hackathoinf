@@ -62,9 +62,11 @@ router.post("/agent", async (req, res) => {
         }
 
         const scriptPath = path.join(__dirname, "../services/agent.py");
-        // Use the venv python interpreter
-        const pythonExecutable = path.join(__dirname, "../venv/bin/python3");
+        // Use the system python (adjust if you strictly need a venv, e.g. "python")
+        const pythonExecutable = "python";
         
+        console.log("[POST /api/ai/agent] Spawning python, GEMINI_API_KEY exists?", !!process.env.GEMINI_API_KEY);
+
         const pythonProcess = spawn(pythonExecutable, [scriptPath], {
             env: { ...process.env } // Pass environment variables including GEMINI_API_KEY
         });

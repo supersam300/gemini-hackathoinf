@@ -2,6 +2,8 @@ require("express-async-errors");
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+// Load environment variables from the project root
+require("dotenv").config({ path: path.join(__dirname, "../.env") });
 const connectDB = require("./db");
 const arduinoRoutes = require("./routes/arduino");
 const circuitRoutes = require("./routes/circuits");
