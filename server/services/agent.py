@@ -110,7 +110,7 @@ Common pins:
 DO NOT ASK THE USER FOR CLARIFICATION ON PINS unless absolutely necessary. Pick the first available open logical pin!"""
 
         chat = client.chats.create(
-            model="gemini-2.5-flash",
+            model="gemini-3",
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 tools=[get_canvas_state_tool, update_canvas_state_tool],
