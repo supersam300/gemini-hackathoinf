@@ -454,8 +454,8 @@ export default function App() {
     pushHistory(components, updatedWires);
   }, [pushHistory, components]);
 
-  // ── AI Chat — send message to Gemini agent (placeholder, wired for real API) ─
-  const handleSendMessage = useCallback((content: string) => {
+  // ── AI Chat — send message to Gemini agent ──────────────────────────────
+  const handleSendMessage = useCallback(async (content: string) => {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
@@ -464,30 +464,49 @@ export default function App() {
       timestamp: now,
     };
     setMessages(prev => [...prev, userMsg]);
+    setStatusMessage('Agent is thinking...');
 
-    // Placeholder AI responses — replace with real Gemini API integration
-    const aiResponses = [
-      'For the LED blink circuit, connect R1 (220Ω) in series with D1 from pin 13 to GND. Here\'s the sketch:\nvoid setup() { pinMode(13, OUTPUT); }\nvoid loop() { digitalWrite(13, HIGH); delay(1000); digitalWrite(13, LOW); delay(1000); }',
-      'Your circuit looks good! The decoupling capacitor C1 should be placed close to the Arduino\'s power pins.',
-      'I see R2 is unconnected — consider using it as a pull-down resistor on pin A0 for a button input.',
-      'I\'ve reviewed your schematic. No short circuits detected.',
-      'Here\'s the BOM for your circuit:\n- U1: Arduino Uno\n- R1: 220Ω resistor\n- R2: 10kΩ resistor\n- D1: Red LED 5mm\n- C1: 100µF capacitor',
-    ];
+    try {
+      const response = await fetch('/api/ai/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: content,
+          canvasState: { components, wires: wiresState }
+        })
+      });
 
-    setTimeout(() => {
-      const response = aiResponses[aiResponseIdx.current % aiResponses.length];
-      aiResponseIdx.current += 1;
-      const isCode = response.includes('\n') && (response.includes('void') || response.includes('-'));
-      const aiMsg: ChatMessage = {
+      const result = await response.json();
+      
+      if (result.success) {
+        const aiMsg: ChatMessage = {
+          id: `a-${Date.now()}`,
+          role: 'ai',
+          content: result.text,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isCode: result.text && result.text.includes('```')
+        };
+        setMessages(prev => [...prev, aiMsg]);
+
+        if (result.actions && result.actions.length > 0) {
+          // Pass the directly parsed actions to executeAIActions
+          executeAIActions({ actions: result.actions });
+        }
+        setStatusMessage('AI response received');
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setMessages(prev => [...prev, {
         id: `a-${Date.now()}`,
         role: 'ai',
-        content: response,
+        content: `Error connecting to AI agent: ${err.message}`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isCode,
-      };
-      setMessages(prev => [...prev, aiMsg]);
-    }, 900);
-  }, []);
+      }]);
+      setStatusMessage('AI Chat failed');
+    }
+  }, [components, wiresState]); // We will omit executeAIActions dependency to avoid circular deps if needed or include it. Wait, I'll include it.
 
   // ── AI Visual QA (Multimodal Gemini Vision) ─────────────────────────────
   const handleVisualQA = useCallback(async (prompt: string) => {
@@ -554,12 +573,17 @@ export default function App() {
     }
   }, [darkMode]);
 
-  const executeAIActions = useCallback((content: string) => {
+  const executeAIActions = useCallback((content: string | any) => {
     try {
-      const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/{[\s\S]*}/);
-      if (!jsonMatch) return;
+      let data;
+      if (typeof content === 'string') {
+        const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/{[\s\S]*}/);
+        if (!jsonMatch) return;
+        data = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+      } else {
+        data = content;
+      }
       
-      const data = JSON.parse(jsonMatch[1] || jsonMatch[0]);
       if (!data.actions || !Array.isArray(data.actions)) return;
 
       data.actions.forEach((action: any) => {
@@ -593,6 +617,21 @@ export default function App() {
               };
               setWiresState(prev => [...prev, newWire]);
               setStatusMessage('AI added a wire');
+            }
+            break;
+          }
+          case 'DELETE_COMPONENT': {
+            if (action.componentId) {
+              setComponents(prev => prev.filter(c => c.id !== action.componentId));
+              setWiresState(prev => prev.filter(w => w.fromComponentId !== action.componentId && w.toComponentId !== action.componentId));
+              setStatusMessage(`AI deleted component ${action.componentId}`);
+            }
+            break;
+          }
+          case 'DELETE_WIRE': {
+            if (action.wireId) {
+              setWiresState(prev => prev.filter(w => w.id !== action.wireId));
+              setStatusMessage('AI deleted a wire');
             }
             break;
           }
