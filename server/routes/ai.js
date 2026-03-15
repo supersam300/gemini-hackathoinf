@@ -56,15 +56,13 @@ const path = require('path');
 // POST /api/ai/agent
 router.post("/agent", async (req, res) => {
     try {
-        const { prompt, canvasState } = req.body;
+        const { prompt, canvasState, image } = req.body;
         if (!prompt) {
             return res.status(400).json({ success: false, error: "Prompt is required" });
         }
 
         const scriptPath = path.join(__dirname, "../services/agent.py");
-        
-        // Use the system python since the venv doesn't exist on this machine
-        const pythonExecutable = "python";
+        const pythonExecutable = "python3";
 
         console.log("[POST /api/ai/agent] Spawning python, GEMINI_API_KEY exists?", !!process.env.GEMINI_API_KEY);
 
@@ -91,7 +89,11 @@ router.post("/agent", async (req, res) => {
         });
 
         // Write the payload to stdin
-        pythonProcess.stdin.write(JSON.stringify({ prompt, canvasState: canvasState || {} }));
+        pythonProcess.stdin.write(JSON.stringify({ 
+            prompt, 
+            canvasState: canvasState || {},
+            image
+        }));
         pythonProcess.stdin.end();
 
         pythonProcess.on("close", (code) => {

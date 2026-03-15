@@ -1,0 +1,8 @@
+{
+  "prompt": "Add an Arduino Uno and an LED on pin 13, wire them up, write code to blink the LED every 500ms, and start the simulation.",
+  "canvasState": {
+    "components": [],
+    "wires": []
+  },
+  "image": null
+}

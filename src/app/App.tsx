@@ -454,125 +454,6 @@ export default function App() {
     pushHistory(components, updatedWires);
   }, [pushHistory, components]);
 
-  // ── AI Chat — send message to Gemini agent ──────────────────────────────
-  const handleSendMessage = useCallback(async (content: string) => {
-    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content,
-      timestamp: now,
-    };
-    setMessages(prev => [...prev, userMsg]);
-    setStatusMessage('Agent is thinking...');
-
-    try {
-      const response = await fetch('/api/ai/agent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: content,
-          canvasState: { components, wires: wiresState }
-        })
-      });
-
-      const result = await response.json();
-      
-      if (result.success) {
-        const aiMsg: ChatMessage = {
-          id: `a-${Date.now()}`,
-          role: 'ai',
-          content: result.text,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isCode: result.text && result.text.includes('```')
-        };
-        setMessages(prev => [...prev, aiMsg]);
-
-        if (result.actions && result.actions.length > 0) {
-          // Pass the directly parsed actions to executeAIActions
-          executeAIActions({ actions: result.actions });
-        }
-        setStatusMessage('AI response received');
-      } else {
-        throw new Error(result.error);
-      }
-    } catch (err: any) {
-      console.error(err);
-      setMessages(prev => [...prev, {
-        id: `a-${Date.now()}`,
-        role: 'ai',
-        content: `Error connecting to AI agent: ${err.message}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }]);
-      setStatusMessage('AI Chat failed');
-    }
-  }, [components, wiresState]); // We will omit executeAIActions dependency to avoid circular deps if needed or include it. Wait, I'll include it.
-
-  // ── AI Visual QA (Multimodal Gemini Vision) ─────────────────────────────
-  const handleVisualQA = useCallback(async (prompt: string) => {
-    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content: `📷 [Screenshot Attached]\n${prompt}`,
-      timestamp: now,
-    };
-    setMessages(prev => [...prev, userMsg]);
-
-    try {
-      const el = document.getElementById('circuit-canvas-container');
-      if (!el) throw new Error('Could not find circuit canvas');
-      
-      setStatusMessage('Taking snapshot for Gemini Vision...');
-      
-      // html2canvas requires the element to be in the DOM and visible.
-      // foreignObjects (if any) can be tricky, but this captures the rendered HTML.
-      const canvas = await html2canvas(el, {
-         backgroundColor: darkMode ? '#1e1e1e' : '#ffffff',
-         scale: 1, // keep it relatively small for the API
-      });
-      
-      const base64Full = canvas.toDataURL('image/jpeg', 0.8);
-      // Remove prefix "data:image/jpeg;base64,"
-      const base64Data = base64Full.split(',')[1];
-      
-      setStatusMessage('Analyzing circuit with Gemini 1.5 Flash...');
-      
-      const response = await fetch('/api/ai/vision', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ image: base64Data, prompt })
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        setMessages(prev => [...prev, {
-          id: `a-${Date.now()}`,
-          role: 'ai',
-          content: result.analysis,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isCode: result.analysis.includes('```') // Very basic code detection
-        }]);
-        executeAIActions(result.analysis);
-        setStatusMessage('AI Analysis complete');
-      } else {
-        throw new Error(result.error);
-      }
-    } catch (err: any) {
-      console.error(err);
-      setMessages(prev => [...prev, {
-        id: `a-${Date.now()}`,
-        role: 'ai',
-        content: `Error analyzing circuit: ${err.message}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }]);
-      setStatusMessage('AI Analysis failed');
-    }
-  }, [darkMode]);
-
   const executeAIActions = useCallback((content: string | any) => {
     try {
       let data;
@@ -647,6 +528,29 @@ export default function App() {
           case 'STOP_SIMULATION':
             simulationStore.stopSimulation();
             break;
+          case 'UPDATE_CODE': {
+            if (action.code) {
+              const fileName = action.fileName || 'blink.ino';
+              setCodeTabs(prev => {
+                const existing = prev.find(t => t.name === fileName);
+                if (existing) {
+                  return prev.map(t => t.name === fileName ? { ...t, content: action.code, isDirty: true } : t);
+                } else {
+                  return [...prev, {
+                    id: `${Date.now()}-${fileName}`,
+                    name: fileName,
+                    content: action.code,
+                    isDirty: true,
+                    extension: fileName.split('.').pop() || '',
+                  }];
+                }
+              });
+              setStatusMessage(`AI updated code: ${fileName}`);
+              setBottomVisible(true);
+              setBottomTab('output'); 
+            }
+            break;
+          }
           default:
             console.warn('Unknown AI action:', action.type);
         }
@@ -655,6 +559,138 @@ export default function App() {
       console.error('Failed to execute AI actions:', e);
     }
   }, [handleSimulate, simulationStore]);
+
+  // ── AI Chat — send message to Gemini agent (Multimodal) ──────────────────
+  const handleSendMessage = useCallback(async (content: string) => {
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsg: ChatMessage = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content,
+      timestamp: now,
+    };
+    setMessages(prev => [...prev, userMsg]);
+    setStatusMessage('Agent is capturing canvas & thinking...');
+
+    try {
+      // Capture screenshot for multimodal support
+      const el = document.getElementById('circuit-canvas-container');
+      let base64Data = null;
+      if (el) {
+        const canvas = await html2canvas(el, {
+          backgroundColor: darkMode ? '#1e1e1e' : '#ffffff',
+          scale: 1,
+        });
+        base64Data = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+      }
+
+      const response = await fetch('/api/ai/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: content,
+          canvasState: { components, wires: wiresState },
+          image: base64Data
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        const aiMsg: ChatMessage = {
+          id: `a-${Date.now()}`,
+          role: 'ai',
+          content: result.text,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isCode: result.text && result.text.includes('```')
+        };
+        setMessages(prev => [...prev, aiMsg]);
+
+        if (result.actions && result.actions.length > 0) {
+          executeAIActions({ actions: result.actions });
+        }
+        setStatusMessage('AI response received');
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setMessages(prev => [...prev, {
+        id: `a-${Date.now()}`,
+        role: 'ai',
+        content: `Error connecting to AI agent: ${err.message}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }]);
+      setStatusMessage('AI Chat failed');
+    }
+  }, [components, wiresState, darkMode, executeAIActions]);
+
+  // ── AI Visual QA (Multimodal Gemini Vision) ─────────────────────────────
+  const handleVisualQA = useCallback(async (prompt: string) => {
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsg: ChatMessage = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: `📷 [Screenshot Attached]\n${prompt}`,
+      timestamp: now,
+    };
+    setMessages(prev => [...prev, userMsg]);
+
+    try {
+      const el = document.getElementById('circuit-canvas-container');
+      if (!el) throw new Error('Could not find circuit canvas');
+      
+      setStatusMessage('Taking snapshot for Gemini Vision...');
+      
+      // html2canvas requires the element to be in the DOM and visible.
+      // foreignObjects (if any) can be tricky, but this captures the rendered HTML.
+      const canvas = await html2canvas(el, {
+         backgroundColor: darkMode ? '#1e1e1e' : '#ffffff',
+         scale: 1, // keep it relatively small for the API
+      });
+      
+      const base64Full = canvas.toDataURL('image/jpeg', 0.8);
+      // Remove prefix "data:image/jpeg;base64,"
+      const base64Data = base64Full.split(',')[1];
+      
+      setStatusMessage('Analyzing circuit with Gemini 1.5 Flash...');
+      
+      const response = await fetch('/api/ai/vision', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ image: base64Data, prompt })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setMessages(prev => [...prev, {
+          id: `a-${Date.now()}`,
+          role: 'ai',
+          content: result.analysis,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isCode: result.analysis.includes('```') // Very basic code detection
+        }]);
+        executeAIActions(result.analysis);
+        setStatusMessage('AI Analysis complete');
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setMessages(prev => [...prev, {
+        id: `a-${Date.now()}`,
+        role: 'ai',
+        content: `Error analyzing circuit: ${err.message}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }]);
+      setStatusMessage('AI Analysis failed');
+    }
+  }, [darkMode]);
+
+
 
   // ── Copy / Paste ────────────────────────────────────────────────────────
   const handleCopy = useCallback(() => {

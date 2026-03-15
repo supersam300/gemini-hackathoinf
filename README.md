@@ -14,36 +14,73 @@ Build and test circuits with an agent that becomes your "hands on screen". The i
 - **Simultaneous Simulation:** Real-time AVR simulation for Arduino (Uno, Nano, Mega) and ESP32 boards powered by `avr8js`.
 - **Cloud Connectivity:** Seamlessly sync projects to MongoDB Atlas with semantic search capabilities.
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
-Make sure you have Node.js and npm installed on your system.
+- **Node.js**: v20 or higher
+- **Python**: v3.10 or higher (for AI Agent)
+- **Arduino CLI**: Required for code compilation and uploads. [Installation Guide](https://arduino.github.io/arduino-cli/latest/installation/)
+- **Google Gemini API Key**: Obtain one from [Google AI Studio](https://aistudio.google.com/).
+- **MongoDB Atlas**: A connection string for project syncing.
 
-### Local Development
+## Local Development
 
-1. Clone the repository and install dependencies:
-   ```bash
-   npm install
-   ```
-2. Start the Vite development server:
-   ```bash
-   npm run dev
-   ```
-3. Open `http://localhost:5173` in your browser.
+### 1. Environment Setup
+Create a `.env` file in the root directory (and `server/` directory if running backend separately):
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+MONGODB_URI=your_mongodb_atlas_connection_string
+PORT=3000
+```
 
-*(Optional)* Start the full stack with the backend compilation server:
+### 2. Frontend & Backend
+Clone the repository and install Node.js dependencies:
+```bash
+npm install
+cd server && npm install
+cd ..
+```
+
+### 3. AI Agent (Python) Setup
+The AI agent requires a Python environment. It's recommended to use a virtual environment:
+```bash
+python -m venv venv
+# On Windows:
+.\venv\Scripts\activate
+# On macOS/Linux:
+source venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+### 4. Running the Application
+Start both the Vite frontend and Expres backend using:
 ```bash
 npm run dev:full
+```
+Open `http://localhost:5173` for the frontend.
+
+## Running with Docker
+
+You can run the entire stack (Frontend, Backend, and AI Agent) in a containerized environment.
+
+### Using Docker Compose
+```bash
+docker-compose up --build
+```
+
+### Using Dockerfile (Production)
+```bash
+docker build -t simuide-web .
+docker run -p 3000:3000 --env-file .env simuide-web
 ```
 
 ## Technology Stack
 
 - **Frontend:** React 18, TypeScript, Vite, Tailwind CSS
-- **AI Engine:** Google Gemini (Multimodal & Embeddings) via Google GenAI SDK
+- **AI Engine:** Google Gemini (1.5 Flash & 1.5 Pro) via `google-genai` Python SDK
 - **Backend:** Node.js, Express, MongoDB Atlas
-- **Simulation:** AVR8js (AVR CPU Simulator)
-- **Canvas:** custom SVG rendering & `@wokwi/elements` 
-- **Cloud Hosting:** Optimized for Google Cloud Run
+- **Simulation:** AVR8js & `@wokwi/elements`
+- **Compiler:** `arduino-cli` integrated into the backend pipeline
 
 ## Project Structure
 

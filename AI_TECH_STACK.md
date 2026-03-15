@@ -7,28 +7,29 @@ The UI Navigator is a multimodal AI agent designed to act as the user's "hands o
 ### Mandatory Technology Stack
 
 1.  **Multimodal Intelligence**: 
-    *   **Model**: Google Gemini 1.5 Flash (or Pro).
-    *   **Capability**: Interprets screenshots and screen recordings to understand visual context and output structured, executable actions.
+    *   **Model**: Google Gemini 2.0 Flash (Experimental) / 1.5 Flash.
+    *   **Capability**: Interprets screenshots and reads direct canvas state to output structured, executable actions.
 2.  **Development SDK**: 
-    *   **Google GenAI SDK**: Used for seamless integration with Gemini models in the Node.js backend.
+    *   **Google GenAI Python SDK**: The core agent logic (`agent.py`) uses the official `google-genai` library for robust tool-calling and multimodal support.
 3.  **Hosting & Infrastructure**: 
-    *   **Google Cloud Platform (GCP)**: The agent and backend services are hosted on Google Cloud (e.g., Cloud Run for serverless execution, Artifact Registry for container management).
+    *   **Google Cloud Platform (GCP)**: Optimized for Cloud Run.
 
 ### Core Requirements Check
 
 - [x] **Leverage a Gemini model**: Uses `gemini-1.5-flash` for high-speed multimodal reasoning.
-- [x] **Google GenAI SDK**: Implemented via `@google/genai` library in the backend service.
-- [x] **Google Cloud Service**: Fully containerized with Docker, ready for deployment on **Google Cloud Run**.
+- [x] **Google GenAI SDK**: Implemented via `google-genai` Python library.
+- [x] **Google Cloud Service**: Ready for deployment on **Google Cloud Run**.
 
 ### Implementation Details: UI Navigator Agent
 
 The agent functions by:
-1.  **Capturing Context**: Taking high-resolution snapshots of the circuit canvas using `html2canvas`.
-2.  **Visual Reasoning**: Sending the snapshot + user intent to Gemini via the GenAI SDK.
-3.  **Action Execution**: Parsing structured JSON responses from Gemini to:
-    *   `PLACE_COMPONENT`: Add new elements to the canvas.
-    *   `ADD_WIRE`: Link component pins.
-    *   `START_SIMULATION` / `STOP_SIMULATION`: Control the simulation lifecycle.
+1.  **Capturing Context**: Taking snapshots of the canvas using `html2canvas`.
+2.  **Visual Reasoning**: Sending snapshots + structured state to Gemini.
+3.  **Action Execution**: Parsing JSON responses to:
+    *   `PLACE_COMPONENT`: Add elements.
+    *   `ADD_WIRE`: Link pins.
+    *   `UPDATE_CODE`: Write/Update Arduino snippets in the IDE.
+    *   `START_SIMULATION`: Initiate the digital twin logic.
 
 ### Use Cases
 - **Universal Web Navigator**: Automating workflows by "looking" at the screen.

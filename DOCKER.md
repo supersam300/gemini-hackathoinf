@@ -57,8 +57,21 @@ gcloud run deploy simuide \
   --set-env-vars="NODE_ENV=production,PORT=3000"
 ```
 
+## Docker Build Details
+
+The production `Dockerfile` performs several critical steps to ensure the full stack is operational:
+1. **Frontend Build**: Compiles the React + Vite application into static assets.
+2. **Runtime Environment**:
+   - **Node.js**: Serves the API and static files.
+   - **Python 3**: Runs the AI logic (`agent.py`).
+   - **Arduino CLI**: Installed and configured with `arduino:avr` core for sketch compilation.
+3. **Dependency Management**:
+   - `npm ci`: Installs Node.js production dependencies.
+   - `pip install`: Installs AI Agent dependencies from `requirements.txt`.
+
 ## Key Configuration Files
-- **Dockerfile:** Multi-stage production build (Node.js + Static Files).
-- **Dockerfile.dev:** Fast development build with focus on Vite dev features.
-- **docker-compose.yml:** Standard production-like stack.
-- **.dockerignore:** Excludes `node_modules`, `dist`, and local `.env` files to keep the build context clean.
+- **Dockerfile:** Multi-stage build (Node.js + Python + Arduino CLI).
+- **requirements.txt:** Python dependencies for the Gemini AI agent.
+- **docker-compose.yml:** Standard stack orchestration including environment forwarding.
+- **.dockerignore:** Excludes local build artifacts and sensitive keys.
+

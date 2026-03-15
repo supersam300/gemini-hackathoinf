@@ -14,6 +14,7 @@ def main():
         data = json.loads(input_data)
         prompt = data.get("prompt", "")
         canvas_state = data.get("canvasState", {})
+        image_base64 = data.get("image")
 
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
@@ -39,51 +40,38 @@ def main():
             function_declarations=[
                 types.FunctionDeclaration(
                     name="update_canvas_state",
-                    description="Propose an update to make changes to the circuit canvas. Returns the list of actions to perform.",
+                    description="Propose updates to the circuit canvas or code editor. Use this to place components, connect wires, or write Arduino code.",
                     parameters=types.Schema(
                         type=types.Type.OBJECT,
                         properties={
                             "actions": types.Schema(
                                 type=types.Type.ARRAY,
-                                description="List of actions to perform on the canvas",
+                                description="List of actions to perform",
                                 items=types.Schema(
                                     type=types.Type.OBJECT,
                                     properties={
                                         "type": types.Schema(
                                             type=types.Type.STRING,
-                                            description="The type of action to perform. Examples: 'PLACE_COMPONENT', 'ADD_WIRE', 'DELETE_COMPONENT', 'DELETE_WIRE', 'START_SIMULATION', 'STOP_SIMULATION'."
+                                            description="Action type: 'PLACE_COMPONENT', 'ADD_WIRE', 'DELETE_COMPONENT', 'DELETE_WIRE', 'UPDATE_CODE', 'START_SIMULATION', 'STOP_SIMULATION'."
                                         ),
                                         "componentType": types.Schema(
                                             type=types.Type.STRING,
-                                            description="Type of component (e.g., 'led', 'resistor', 'arduino-uno'). Required for PLACE_COMPONENT."
+                                            description="Type of component (e.g., 'led', 'resistor', 'arduino-uno')."
                                         ),
-                                        "x": types.Schema(
-                                            type=types.Type.NUMBER,
-                                            description="X coordinate. Required for PLACE_COMPONENT."
-                                        ),
-                                        "y": types.Schema(
-                                            type=types.Type.NUMBER,
-                                            description="Y coordinate. Required for PLACE_COMPONENT."
-                                        ),
-                                        "label": types.Schema(
+                                        "x": types.Schema(type=types.Type.NUMBER),
+                                        "y": types.Schema(type=types.Type.NUMBER),
+                                        "label": types.Schema(type=types.Type.STRING),
+                                        "componentId": types.Schema(type=types.Type.STRING),
+                                        "from": types.Schema(type=types.Type.STRING),
+                                        "to": types.Schema(type=types.Type.STRING),
+                                        "wireId": types.Schema(type=types.Type.STRING),
+                                        "code": types.Schema(
                                             type=types.Type.STRING,
-                                            description="Label for the component (e.g., 'D1', 'R1'). Required for PLACE_COMPONENT."
+                                            description="The source code to write to the editor. Required for UPDATE_CODE."
                                         ),
-                                        "componentId": types.Schema(
+                                        "fileName": types.Schema(
                                             type=types.Type.STRING,
-                                            description="ID of the component to delete. Required for DELETE_COMPONENT."
-                                        ),
-                                        "from": types.Schema(
-                                            type=types.Type.STRING,
-                                            description="Source pin for new wire in format 'componentId:pinName' (e.g. 'u1:13'). Required for ADD_WIRE."
-                                        ),
-                                        "to": types.Schema(
-                                            type=types.Type.STRING,
-                                            description="Target pin for new wire in format 'componentId:pinName' (e.g. 'd1:anode'). Required for ADD_WIRE."
-                                        ),
-                                        "wireId": types.Schema(
-                                            type=types.Type.STRING,
-                                            description="ID of the wire to delete. Required for DELETE_WIRE."
+                                            description="The name of the file (e.g., 'blink.ino'). Required for UPDATE_CODE."
                                         )
                                     },
                                     required=["type"]
@@ -96,24 +84,38 @@ def main():
             ]
         )
 
-        system_instruction = """You are a helpful AI assistant for a circuit simulator called SimuIDE. 
-You can interact with the user's circuit canvas by using tools.
-1. ALWAYS start by calling 'get_canvas_state' to understand the current circuit.
-2. If the user asks to connect components that are NOT on the canvas, YOU MUST FIRST PLACE THEM using 'update_canvas_state' with 'PLACE_COMPONENT'.
-3. Assign clear IDs (e.g., 'UNO1', 'LED1', 'R1') to placed components so you can refer to them in 'ADD_WIRE'.
-4. Perform all required actions (placing and connecting) in a single 'update_canvas_state' call if possible, or across multiple turns.
-5. For connections, use format 'id:pin'. INFER pins if not specified (Arduino '13', LED 'anode', etc.).
-DO NOT ASK FOR PERMISSION TO PLACE COMPONENTS. If the user says 'Connect X to Y' and they are missing, place them and connect them immediately."""
+        system_instruction = """You are a Multimodal AI Developer for SimuIDE.
+You can see the circuit canvas via screenshots and read its structured state (components and wires).
+Your goal is to help the user build working electronic projects by placing components, wiring them, and WRITING EXEUTABLE CODE.
+
+1. ALWAYS 'get_canvas_state' to see exactly what is connected.
+2. Use vision context (if provided) to cross-reference with the structured state.
+3. If the user wants a working project or says "make it work", you MUST:
+   - Identify the microcontroller (e.g., Arduino Uno) and the connected components (LEDs, Sensors, etc.). 
+   - Write the correspondiong Arduino C++ code using the 'UPDATE_CODE' action.
+   - The code MUST match the pins used on the canvas. 
+   - Trigger 'START_SIMULATION' once the code and circuit are ready.
+4. If the user prompt specifically asks for logic (e.g., "blink the red LED every 2 seconds"), prioritize that in your 'UPDATE_CODE' output.
+5. You can perform multiple actions in one call: PLACE_COMPONENT, ADD_WIRE, and UPDATE_CODE."""
 
         chat = client.chats.create(
-            model="gemini-2.5-flash",
+            model="gemini-2.0-flash",
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 tools=[get_canvas_state_tool, update_canvas_state_tool],
             )
         )
 
-        response = chat.send_message(prompt)
+        initial_parts = [types.Part(text=prompt)]
+        if image_base64:
+            initial_parts.append(types.Part(
+                inline_data=types.Blob(
+                    data=image_base64,
+                    mime_type="image/jpeg"
+                )
+            ))
+
+        response = chat.send_message(initial_parts)
         
         agent_text = ""
         pending_actions = []
@@ -134,9 +136,9 @@ DO NOT ASK FOR PERMISSION TO PLACE COMPONENTS. If the user says 'Connect X to Y'
             # Collect text and function calls from this turn
             tool_calls = []
             for p in parts:
-                if hasattr(p, 'text') and p.text:
+                if p.text:
                     agent_text += p.text + " "
-                if hasattr(p, 'function_call') and p.function_call:
+                if p.function_call:
                     tool_calls.append(p.function_call)
 
             # If no tool calls, the model is done responding
@@ -148,9 +150,11 @@ DO NOT ASK FOR PERMISSION TO PLACE COMPONENTS. If the user says 'Connect X to Y'
             for func_call in tool_calls:
                 if func_call.name == "get_canvas_state":
                     tool_responses.append(
-                        types.Part.from_function_response(
-                            name="get_canvas_state",
-                            response={"canvas": canvas_state} if canvas_state else {"canvas": {"components": [], "wires": []}}
+                        types.Part(
+                            function_response=types.FunctionResponse(
+                                name="get_canvas_state",
+                                response={"canvas": canvas_state} if canvas_state else {"canvas": {"components": [], "wires": []}}
+                            )
                         )
                     )
                 elif func_call.name == "update_canvas_state":
@@ -158,9 +162,11 @@ DO NOT ASK FOR PERMISSION TO PLACE COMPONENTS. If the user says 'Connect X to Y'
                     if "actions" in args:
                         pending_actions.extend(args["actions"])
                     tool_responses.append(
-                        types.Part.from_function_response(
-                            name="update_canvas_state",
-                            response={"success": True, "message": "Actions applied to canvas."}
+                        types.Part(
+                            function_response=types.FunctionResponse(
+                                name="update_canvas_state",
+                                response={"success": True, "message": "Actions applied to canvas."}
+                            )
                         )
                     )
 
@@ -199,6 +205,8 @@ DO NOT ASK FOR PERMISSION TO PLACE COMPONENTS. If the user says 'Connect X to Y'
                 'DELETE_WIRE': 'DELETE_WIRE',
                 'START_SIMULATION': 'START_SIMULATION',
                 'STOP_SIMULATION': 'STOP_SIMULATION',
+                'UPDATE_CODE': 'UPDATE_CODE',
+                'WRITE_CODE': 'UPDATE_CODE',
             }
             normalized_type = type_map.get(action_type, action.get('type'))
             result = {**action, 'type': normalized_type}
@@ -210,6 +218,11 @@ DO NOT ASK FOR PERMISSION TO PLACE COMPONENTS. If the user says 'Connect X to Y'
                 to_str = action.get('to', '')
                 result['from'] = normalize_pin(from_str)
                 result['to'] = normalize_pin(to_str)
+            
+            # Ensure UPDATE_CODE specific fields are present if it's an UPDATE_CODE action
+            if normalized_type == 'UPDATE_CODE':
+                result['code'] = action.get('code', '')
+                result['fileName'] = action.get('fileName', 'blink.ino')
 
             return result
 

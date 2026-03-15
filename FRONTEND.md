@@ -126,7 +126,7 @@ src/
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| **AIPanel** | `app/components/AIPanel.tsx` | Collapsible Gemini AI chat panel. Supports standard chat and **Visual QA** mode (using `html2canvas` and Gemini 1.5 Flash) for multimodal circuit analysis. |
+| **AIPanel** | `app/components/AIPanel.tsx` | Collapsible Gemini AI chat panel. Supports standard chat, **Visual QA** mode (using `html2canvas`), and **Autonomous Action Execution** (placing components, wiring, and code generation via `agent.py`). |
 
 ### Arduino IDE (Code Editor View)
 
@@ -441,7 +441,7 @@ npm run lint
 
 ## Notes
 
-- The **AIPanel** currently uses placeholder mock responses. Wire it to the Gemini API for production use.
 - The old layout components (`src/components/layout/`) still exist in the codebase but are no longer in the render tree.
 - The `@xyflow/react` and `@monaco-editor/react` packages remain installed and can be re-integrated if needed—the current UI uses the reference repo's custom canvas and editor instead.
 - Dark mode defaults to enabled and is toggleable via the View menu.
+

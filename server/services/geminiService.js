@@ -4,7 +4,7 @@ const Document = require("../models/Document");
 // Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const EMBEDDING_MODEL = "text-embedding-004";
-const VISION_MODEL = "gemini-1.5-flash";
+const VISION_MODEL = "gemini-2.5-flash";
 
 /**
  * Generate an embedding vector for the provided text.
@@ -100,15 +100,18 @@ If no action is required, just provide a text analysis. Always prioritize accura
 
         const response = await ai.models.generateContent({
             model: VISION_MODEL,
-            contents: [
-                { role: "user", parts: [{ text: systemPrompt + "\n\nUser Request: " + promptText }] },
-                {
-                    inlineData: {
-                        data: base64Image,
-                        mimeType: "image/jpeg"
+            contents: [{
+                role: "user",
+                parts: [
+                    { text: systemPrompt + "\n\nUser Request: " + promptText },
+                    {
+                        inlineData: {
+                            data: base64Image,
+                            mimeType: "image/jpeg"
+                        }
                     }
-                }
-            ]
+                ]
+            }]
         });
         
         return response.response.text();

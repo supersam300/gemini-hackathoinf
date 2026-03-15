@@ -11,14 +11,14 @@ simuide-web/
 │   ├── index.js                # Server entry point, API routes, Static file server
 │   ├── db.js                   # MongoDB Atlas connection logic
 │   ├── routes/                 # API Endpoints
-│   │   ├── ai.js               # Gemini Vision and Vector Search routes
+│   │   ├── ai.js               # Gemini Multimodal routes (spawn agent.py)
 │   │   ├── arduino.js          # Arduino CLI compilation/upload routes
 │   │   └── circuits.js         # MongoDB CRUD for project persistence
 │   ├── services/               # Backend business logic
-│   │   └── geminiService.js    # Integrated Google GenAI SDK logic
+│   │   ├── geminiService.js    # Integrated Google GenAI SDK logic
+│   │   └── agent.py            # AI Agent (Python) with tool-calling & vision
 │   └── models/                 # Mongoose Data Models
-│       ├── Circuit.js          # Schema for canvas & code persistence
-│       └── Document.js         # Schema for Vector Embeddings (RAG)
+├── requirements.txt            # Python dependencies for the AI Agent
 ├── src/                        # React Frontend (TypeScript + Vite)
 │   ├── app/                    # Application Root
 │   │   ├── App.tsx             # Main layout & View orchestration
