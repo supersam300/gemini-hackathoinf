@@ -6,6 +6,7 @@ import { CircuitCanvas, PlacedComponent, Wire } from './components/CircuitCanvas
 import { AIPanel, ChatMessage } from './components/AIPanel';
 import { StatusBar } from './components/StatusBar';
 import { compileSketch } from '../api/arduino';
+import { saveCircuit, loadCircuit } from '../api/circuits';
 // Code Editor imports
 import { Editor } from './components/arduino-ide/Editor';
 import { BottomPanel } from './components/arduino-ide/BottomPanel';
@@ -13,6 +14,7 @@ import { Sidebar } from './components/arduino-ide/Sidebar';
 import ArduinoToolbar from '../components/arduino/ArduinoToolbar';
 import JSZip from 'jszip';
 import html2canvas from 'html2canvas';
+import LoadDialog from '../components/layout/LoadDialog';
 import {
   FileNode,
   OpenTab,
@@ -21,7 +23,6 @@ import {
 } from './components/arduino-ide/arduinoData';
 import { BOARDS, PORTS } from './components/arduino-ide/data';
 // Existing stores & APIs
-import { useProjectStore } from '../store/projectStore';
 import { useEditorStore } from '../store/editorStore';
 import { useArduinoStore } from '../store/arduinoStore';
 import { useSimulationStore } from '../store/simulationStore';
@@ -99,6 +100,9 @@ export default function App() {
   // ── Clipboard for multi-component copy/paste ────────────────────────────
   const [clipboard, setClipboard] = useState<{ components: PlacedComponent[]; wires: Wire[] } | null>(null);
 
+  // ── Load Workspace dialog ───────────────────────────────────────────────
+  const [loadDialogOpen, setLoadDialogOpen] = useState(false);
+
   // ── Code Editor state ───────────────────────────────────────────────────
   const [codeTabs, setCodeTabs] = useState<OpenTab[]>([defaultCodeTab]);
   const [codeActiveTabId, setCodeActiveTabId] = useState<string | null>('blink-ino');
@@ -106,14 +110,7 @@ export default function App() {
   const [bottomVisible, setBottomVisible] = useState(true);
   const [bottomTab, setBottomTab] = useState<BottomTab>('output');
 
-  // ── Existing stores (backend integrations) ──────────────────────────────
-  const {
-    saveToCloud,
-    loadFromCloud,
-    cloudSaving,
-    cloudLoading,
-    cloudCircuitId,
-  } = useProjectStore();
+
 
   const editorStore = useEditorStore();
   const arduinoStore = useArduinoStore();
@@ -650,26 +647,76 @@ export default function App() {
     setStatusMessage(`Pasted ${newComponents.length} component(s)`);
   }, [clipboard, components, wiresState, pushHistory]);
 
-  // ── Cloud Save / Load integrating existing projectStore ─────────────────
+  // ── Cloud Save / Load — directly using canvas state ───────────────────
   const handleCloudSave = useCallback(async () => {
     const name = window.prompt('Project name:', 'My Circuit');
     if (!name) return;
-    const ok = await saveToCloud(name);
-    if (ok) {
+    try {
+      // Map PlacedComponent[] → API components format
+      const apiComponents = components.map(c => ({
+        nodeId: c.id,
+        type: 'componentNode',
+        componentType: c.type,
+        label: c.label,
+        position: { x: c.x, y: c.y },
+        properties: { rotation: c.rotation, ...(c.attrs || {}) } as Record<string, unknown>,
+        handles: { inputs: [], outputs: [] },
+      }));
+      // Map Wire[] → API connections format
+      const apiConnections = wiresState.map(w => ({
+        edgeId: w.id,
+        from: { nodeId: w.fromComponentId, componentType: '', handle: w.fromPinName },
+        to: { nodeId: w.toComponentId, componentType: '', handle: w.toPinName },
+        type: w.color,
+      }));
+      await saveCircuit({
+        projectName: name,
+        code: activeCode,
+        language: 'cpp',
+        components: apiComponents,
+        connections: apiConnections,
+      });
       setStatusMessage('Project saved to cloud ✓');
-    } else {
-      setStatusMessage('Save failed. Is the server running?');
+    } catch (err: any) {
+      setStatusMessage(`Save failed: ${err.message}`);
     }
-  }, [saveToCloud]);
+  }, [components, wiresState, activeCode]);
 
   const handleCloudLoad = useCallback(async (id: string) => {
-    const ok = await loadFromCloud(id);
-    if (ok) {
-      setStatusMessage('Project loaded from cloud ✓');
-    } else {
-      setStatusMessage('Load failed.');
+    try {
+      const res = await loadCircuit(id);
+      const { circuit } = res;
+      // Map API components → PlacedComponent[]
+      const loadedComponents: PlacedComponent[] = circuit.components.map(c => ({
+        id: c.nodeId,
+        type: c.componentType,
+        label: c.label,
+        x: c.position.x,
+        y: c.position.y,
+        rotation: (c.properties?.rotation as number) ?? 0,
+        selected: false,
+        attrs: Object.fromEntries(
+          Object.entries(c.properties || {}).filter(([k]) => k !== 'rotation').map(([k, v]) => [k, String(v)])
+        ),
+      }));
+      // Map API connections → Wire[]
+      const loadedWires: Wire[] = circuit.connections.map(conn => ({
+        id: conn.edgeId,
+        fromComponentId: conn.from.nodeId,
+        fromPinName: conn.from.handle,
+        toComponentId: conn.to.nodeId,
+        toPinName: conn.to.handle,
+        color: conn.type || 'green',
+      }));
+      setComponents(loadedComponents);
+      setWiresState(loadedWires);
+      setHistory([{ components: loadedComponents, wires: loadedWires }]);
+      setHistoryIndex(0);
+      setStatusMessage(`Loaded "${circuit.projectName}" ✓`);
+    } catch (err: any) {
+      setStatusMessage(`Load failed: ${err.message}`);
     }
-  }, [loadFromCloud]);
+  }, []);
 
   // ── Menu bar action handlers ────────────────────────────────────────────
   const handleMenuAction = useCallback((action: string) => {
@@ -967,23 +1014,22 @@ export default function App() {
             </svg>
           </div>
           <span className="text-[12px] font-semibold text-[#e0e0e0] tracking-wide">SimuIDE</span>
-          {/* Cloud status indicator */}
-          {cloudCircuitId && (
-            <span className="text-[10px] text-green-400 flex items-center gap-1 ml-2" title="Synced with cloud">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
-              Saved
-            </span>
-          )}
         </div>
         <div className="ml-auto flex items-center gap-2">
           {/* Cloud Save/Load buttons */}
           <button
             onClick={handleCloudSave}
-            disabled={cloudSaving}
-            className="text-[10px] text-[#9aa8c0] hover:text-white transition-colors disabled:opacity-50"
+            className="text-[10px] text-[#9aa8c0] hover:text-white transition-colors"
             title="Save to cloud"
           >
-            {cloudSaving ? '⟳' : '☁ Save'}
+            ☁ Save
+          </button>
+          <button
+            onClick={() => setLoadDialogOpen(true)}
+            className="text-[10px] text-[#9aa8c0] hover:text-white transition-colors"
+            title="Load a saved workspace"
+          >
+            ☁ Load
           </button>
           <div className="relative" ref={settingsRef}>
             <button
@@ -1043,7 +1089,7 @@ export default function App() {
         onVerify={handleVerify}
         onUpload={handleUpload}
         onNewProject={() => handleMenuAction('New Project')}
-        onOpenProject={() => handleMenuAction('Open...')}
+        onOpenProject={() => setLoadDialogOpen(true)}
         onSaveProject={() => handleMenuAction('Save')}
         darkMode={darkMode}
         activeView={activeView}
@@ -1157,6 +1203,15 @@ export default function App() {
           darkMode={darkMode}
         />
       </div>
+
+      <LoadDialog
+        open={loadDialogOpen}
+        onClose={() => setLoadDialogOpen(false)}
+        onLoad={(id) => {
+          handleCloudLoad(id);
+          setStatusMessage('Workspace loaded ✓');
+        }}
+      />
 
       <StatusBar
         statusMessage={statusMessage}
