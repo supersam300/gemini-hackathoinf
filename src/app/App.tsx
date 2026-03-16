@@ -238,14 +238,17 @@ export default function App() {
   }, [ideFileTree, codeTabs]);
 
   // ── Verify using real Arduino backend when available ─────────
-  const handleVerify = useCallback(() => {
+  const handleVerify = useCallback(async () => {
     if (arduinoStore.compileStatus === 'running' || arduinoStore.uploadStatus === 'running') return;
     arduinoStore.clearLog();
     setBottomVisible(true);
     setBottomTab('output');
 
     const files = getAllFiles();
-    arduinoStore.compile(files);
+    const ok = await arduinoStore.compile(files);
+    if (!ok) {
+      setStatusMessage('Build failed - check output for details');
+    }
   }, [getAllFiles, arduinoStore]);
 
   // ── Upload using real Arduino backend when available ────────────────────
@@ -587,6 +590,41 @@ export default function App() {
         .replace(/[\{\}\[\]]/g, '')
         .replace(/^["']|["']$/g, '')
         .trim();
+      const looksLikeJsonBlob = (value: string) => {
+        const s = String(value || '').trim();
+        if (!s) return false;
+        if (/^[\[{]/.test(s) || /[\]}]$/.test(s)) return true;
+        if (/["'][A-Za-z_][\w-]*["']\s*:/.test(s)) return true;
+        if (s.includes('TYPE') && s.includes('ROTATION') && s.includes('X') && s.includes('Y')) return true;
+        if (s.includes('{') && s.includes(':') && s.includes(',')) return true;
+        return false;
+      };
+      const isSafeRefToken = (value: string, maxLen = 40) => {
+        const s = String(value || '').trim();
+        if (!s) return false;
+        if (s.length > maxLen) return false;
+        if (looksLikeJsonBlob(s)) return false;
+        if (/[\r\n\t]/.test(s)) return false;
+        return true;
+      };
+      const nextLabelForType = (compType: string) => {
+        const prefixMap: Record<string, string> = {
+          'arduino-uno': 'U',
+          resistor: 'R',
+          led: 'D',
+          capacitor: 'C',
+          battery: 'B',
+          gnd: 'G',
+          vcc: 'V',
+        };
+        const prefix = prefixMap[compType] || compType.charAt(0).toUpperCase() || 'C';
+        let maxN = 0;
+        for (const c of nextComponents) {
+          const m = String(c.label || '').trim().toUpperCase().match(new RegExp(`^${prefix}(\\d+)$`));
+          if (m) maxN = Math.max(maxN, Number.parseInt(m[1], 10));
+        }
+        return `${prefix}${maxN + 1}`;
+      };
       const toNumber = (v: unknown): number | null => {
         if (typeof v === 'number' && Number.isFinite(v)) return v;
         const parsed = Number.parseFloat(String(v ?? '').replace(/[^\d.-]/g, ''));
@@ -853,8 +891,13 @@ export default function App() {
 
             const rawLabel = action.label || action.LABEL || action.componentId || action.COMPONENTID || action.id || action.ID;
             const rawId = action.id || action.ID || action.componentId || action.COMPONENTID || rawLabel;
-            const compLabel = sanitizeToken(rawLabel) || componentType.toUpperCase();
-            const compId = sanitizeToken(rawId) || `${componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+            const sanitizedLabel = sanitizeToken(rawLabel);
+            const fallbackLabel = nextLabelForType(componentType);
+            const compLabel = isSafeRefToken(sanitizedLabel, 24) ? sanitizedLabel : fallbackLabel;
+            const sanitizedId = sanitizeToken(rawId).replace(/\s+/g, '-');
+            const compId = isSafeRefToken(sanitizedId, 48)
+              ? sanitizedId
+              : `${componentType}-${fallbackLabel.toLowerCase()}-${Date.now().toString(36)}`;
             const px = toNumber(action.x ?? action.X);
             const py = toNumber(action.y ?? action.Y);
             const auto = findAutoPosition(componentType);
@@ -874,6 +917,8 @@ export default function App() {
               nextComponents.push(newComp);
               createdRefMap.set(compId.toLowerCase(), newComp.id);
               createdRefMap.set(compLabel.toLowerCase(), newComp.id);
+              if (rawLabel) createdRefMap.set(String(rawLabel).trim().toLowerCase(), newComp.id);
+              if (rawId) createdRefMap.set(String(rawId).trim().toLowerCase(), newComp.id);
               componentsChanged = true;
             }
             setStatusMessage(`AI placed ${componentType}`);

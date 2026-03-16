@@ -118,6 +118,23 @@ def normalize_pin(pin_str):
     return pin_str
 
 
+def _sanitize_ref_token(value, max_len=48):
+    token = str(value or "").strip().strip('"').strip("'")
+    if not token:
+        return ""
+    if len(token) > max_len:
+        return ""
+    if "\n" in token or "\r" in token or "\t" in token:
+        return ""
+    if token.startswith("{") or token.startswith("[") or token.endswith("}") or token.endswith("]"):
+        return ""
+    if re.search(r"""["'][A-Za-z_][\w-]*["']\s*:""", token):
+        return ""
+    if "{" in token and ":" in token and "," in token:
+        return ""
+    return token
+
+
 def normalize_action(action):
     """Normalize action types and pin formats to match frontend schema."""
     # Some models return `action`/`operation` instead of `type`.
@@ -161,6 +178,16 @@ def normalize_action(action):
         )
         lowered = str(raw_type).strip().lower()
         result["componentType"] = COMPONENT_TYPE_ALIASES.get(lowered, lowered or "led")
+        clean_label = _sanitize_ref_token(result.get("label") or action.get("label"))
+        clean_id = _sanitize_ref_token(result.get("id") or action.get("id"))
+        if clean_label:
+            result["label"] = clean_label
+        elif "label" in result:
+            result.pop("label", None)
+        if clean_id:
+            result["id"] = clean_id
+        elif "id" in result:
+            result.pop("id", None)
         if not result.get("label"):
             default_label_map = {
                 "arduino-uno": "U1",
@@ -873,6 +900,7 @@ def apply_action_guardrails(actions, prompt, canvas_state):
                     wire_tuples.append((power_source_ref, "5v", comp_ref, "vcc"))
 
     final_actions = _auto_complete_wiring(final_actions, canvas_state)
+    final_actions = _ensure_build_flow_actions(final_actions, prompt, canvas_state)
     return final_actions
 
 
@@ -882,6 +910,81 @@ def _is_build_intent(prompt):
         token in text
         for token in ("build", "compile", "simulate", "run", "code", "blink", "project", "runnable")
     )
+
+
+def _wants_start_simulation(prompt):
+    text = str(prompt or "").lower()
+    return any(token in text for token in ("simulate", "simulation", "run", "start"))
+
+
+def _count_led_targets(canvas_state, actions):
+    count = 0
+    if isinstance(canvas_state, dict):
+        for comp in canvas_state.get("components", []):
+            if not isinstance(comp, dict):
+                continue
+            ctype = str(comp.get("type") or comp.get("componentType") or "").strip().lower()
+            if "led" in ctype:
+                count += 1
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        if str(action.get("type", "")).upper() != "PLACE_COMPONENT":
+            continue
+        ctype = str(action.get("componentType") or action.get("component") or "").strip().lower()
+        if "led" in ctype:
+            count += 1
+    return max(1, min(count, 8))
+
+
+def _build_default_blink_code(led_count):
+    n = max(1, min(int(led_count or 1), 8))
+    pin_decls = "\n".join(
+        [f"const int LED{i}_PIN = {PIN_SEQUENCE[(i - 1) % len(PIN_SEQUENCE)]};" for i in range(1, n + 1)]
+    )
+    setup_lines = "\n".join([f"  pinMode(LED{i}_PIN, OUTPUT);" for i in range(1, n + 1)])
+    phase_lines = []
+    for i in range(1, n + 1):
+        phase_lines.append(f"  digitalWrite(LED{i}_PIN, HIGH);")
+        for j in range(1, n + 1):
+            if j != i:
+                phase_lines.append(f"  digitalWrite(LED{j}_PIN, LOW);")
+        phase_lines.append("  delay(500);")
+        phase_lines.append("")
+    phases = "\n".join(phase_lines).rstrip()
+    return f"""{pin_decls}
+
+void setup() {{
+{setup_lines}
+}}
+
+void loop() {{
+{phases}
+}}
+"""
+
+
+def _ensure_build_flow_actions(actions, prompt, canvas_state):
+    if not _is_build_intent(prompt):
+        return actions
+    if _wants_wiring_only(prompt):
+        return actions
+
+    has_update = any(str(a.get("type", "")).upper() == "UPDATE_CODE" for a in actions if isinstance(a, dict))
+    has_verify = any(str(a.get("type", "")).upper() == "VERIFY_BUILD" for a in actions if isinstance(a, dict))
+    has_start = any(str(a.get("type", "")).upper() == "START_SIMULATION" for a in actions if isinstance(a, dict))
+
+    if not has_update:
+        actions.append({
+            "type": "UPDATE_CODE",
+            "fileName": "Blink.ino",
+            "code": _build_default_blink_code(_count_led_targets(canvas_state, actions)),
+        })
+    if not has_verify:
+        actions.append({"type": "VERIFY_BUILD"})
+    if _wants_start_simulation(prompt) and not has_start:
+        actions.append({"type": "START_SIMULATION"})
+    return actions
 
 
 def _component_ref(comp):
