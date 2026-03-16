@@ -543,6 +543,40 @@ export default function App() {
         return aliases[raw] || raw;
       };
 
+      const parseActionMaybeString = (value: unknown): any | null => {
+        if (value && typeof value === 'object') return value;
+        const raw = String(value || '').trim();
+        if (!raw) return null;
+        try {
+          return JSON.parse(raw);
+        } catch {
+          // Best-effort conversion for python-style dict strings.
+          try {
+            const repaired = raw
+              .replace(/([{,]\s*)'([^']+?)'\s*:/g, '$1"$2":')
+              .replace(/:\s*'([^']*?)'(\s*[},])/g, ': "$1"$2');
+            return JSON.parse(repaired);
+          } catch {
+            return null;
+          }
+        }
+      };
+
+      const inferComponentTypeFromBlob = (blob: string): string => {
+        const text = blob.toLowerCase();
+        if (text.includes('arduino') || text.includes('uno')) return 'arduino-uno';
+        if (text.includes('resistor')) return 'resistor';
+        if (text.includes('led')) return 'led';
+        if (text.includes('"type":"gnd"') || text.includes("'type':'gnd'") || text.includes('ground')) return 'gnd';
+        if (text.includes('"type":"vcc"') || text.includes("'type':'vcc'")) return 'vcc';
+        if (text.includes('battery')) return 'battery';
+        return '';
+      };
+
+      const normalizedActions = data.actions
+        .map((rawAction: any) => parseActionMaybeString(rawAction))
+        .filter((a: any) => a && typeof a === 'object');
+
       const norm = (v: unknown) => String(v || '').trim().toLowerCase();
       const resolveComponentId = (ref: unknown): string | null => {
         const token = String(ref || '').trim();
@@ -715,26 +749,33 @@ export default function App() {
         return matchedNodeId;
       };
 
-      data.actions.forEach((action: any) => {
-        const actionType = normalizeActionType(action?.type);
+      normalizedActions.forEach((action: any) => {
+        const actionType = normalizeActionType(
+          action?.type || action?.action || action?.ACTION || action?.operation || action?.OPERATION
+        );
         switch (actionType) {
           case 'PLACE_COMPONENT': {
             // Use action.id or action.label as the deterministc ID so wires can connect to it.
             // Fall back to a random ID if neither is provided.
-            const componentType = normalizeComponentType(
-              action.componentType || action.component || action.name || action.typeName
+            let componentType = normalizeComponentType(
+              action.componentType || action.COMPONENTTYPE || action.component || action.name || action.NAME || action.typeName || action.TYPE
             );
-            const compLabel = action.label || action.componentId || action.id || componentType.toUpperCase();
-            const compId = action.id || action.componentId || action.label || `${componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+            if (!componentType || /[\{\}\[\]]/.test(componentType) || componentType.length > 40) {
+              componentType = inferComponentTypeFromBlob(JSON.stringify(action));
+            }
+            if (!componentType) break;
+
+            const compLabel = action.label || action.LABEL || action.componentId || action.COMPONENTID || action.id || action.ID || componentType.toUpperCase();
+            const compId = action.id || action.ID || action.componentId || action.COMPONENTID || action.label || action.LABEL || `${componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
             const newComp: PlacedComponent = {
               id: compId,
               type: componentType,
-              x: action.x || 100,
-              y: action.y || 100,
+              x: action.x ?? action.X ?? 100,
+              y: action.y ?? action.Y ?? 100,
               label: compLabel,
               selected: false,
               rotation: 0,
-              attrs: action.properties || {},
+              attrs: action.properties || action.PROPERTIES || {},
             };
             if (!nextComponents.some(c => c.id === newComp.id)) {
               nextComponents.push(newComp);
