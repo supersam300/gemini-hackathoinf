@@ -8,7 +8,10 @@
     "dev:full": "concurrently -k -n \"VITE,SERVER\" -c \"cyan,green\" \"npm run dev\" \"node server/index.js\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "ai:eval": "python scripts/ai/evaluate_replay.py --dataset server/data/ai_eval_golden.jsonl",
+    "ai:ab": "python scripts/ai/baseline_ab.py --dataset server/data/ai_eval_golden.jsonl",
+    "ai:vertex": "python scripts/ai/vertex_tune_and_export.py"
   },
   "dependencies": {
     "@google/genai": "^1.45.0",

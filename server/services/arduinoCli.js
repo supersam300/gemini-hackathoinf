@@ -17,22 +17,31 @@ function getArduinoCliInstallHint() {
 }
 
 function resolveArduinoCliBinary() {
-    const configured = process.env.ARDUINO_CLI_PATH || process.env.ARDUINO_CLI_BIN;
+    const configuredRaw = process.env.ARDUINO_CLI_PATH || process.env.ARDUINO_CLI_BIN;
+    const configured = configuredRaw ? String(configuredRaw).replace(/^"(.*)"$/, "$1") : "";
     if (configured && fs.existsSync(configured)) {
         return configured;
     }
 
     // Common locations for local/dev and containerized runtime.
-    const candidates = [
+    const unixCandidates = [
         "/usr/local/bin/arduino-cli",
         "/usr/bin/arduino-cli",
     ];
+    const windowsCandidates = [
+        process.env.ProgramFiles && path.join(process.env.ProgramFiles, "Arduino CLI", "arduino-cli.exe"),
+        process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "Arduino CLI", "arduino-cli.exe"),
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "Arduino CLI", "arduino-cli.exe"),
+    ].filter(Boolean);
+    const candidates = process.platform === "win32"
+        ? [...windowsCandidates, ...unixCandidates]
+        : unixCandidates;
     for (const candidate of candidates) {
         if (fs.existsSync(candidate)) return candidate;
     }
 
     // Fall back to PATH lookup by command name.
-    return "arduino-cli";
+    return process.platform === "win32" ? "arduino-cli.exe" : "arduino-cli";
 }
 
 /**
@@ -110,10 +119,13 @@ function writeSketch(files) {
  */
 async function compileSketch(files, fqbn) {
     const sketchDir = writeSketch(files);
+    const buildDir = path.join(sketchDir, ".arduino-build");
+    fs.mkdirSync(buildDir, { recursive: true });
     try {
         const result = await runArduinoCli([
             "compile",
             "--fqbn", fqbn,
+            "--build-path", buildDir,
             "--output-dir", sketchDir,
             "--log-level", "info",
             "--format", "text",
@@ -148,11 +160,14 @@ async function compileSketch(files, fqbn) {
  */
 async function uploadSketch(files, fqbn, port) {
     const sketchDir = writeSketch(files);
+    const buildDir = path.join(sketchDir, ".arduino-build");
+    fs.mkdirSync(buildDir, { recursive: true });
     try {
         // First compile
         const compileResult = await runArduinoCli([
             "compile",
             "--fqbn", fqbn,
+            "--build-path", buildDir,
             "--log-level", "info",
             "--format", "text",
             sketchDir,
@@ -171,6 +186,7 @@ async function uploadSketch(files, fqbn, port) {
             "upload",
             "--fqbn", fqbn,
             "--port", port,
+            "--input-dir", buildDir,
             "--log-level", "info",
             "--format", "text",
             sketchDir,

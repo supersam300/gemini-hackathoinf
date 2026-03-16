@@ -1,0 +1,10 @@
+{
+  "project": "demo-project",
+  "region": "us-central1",
+  "baseModel": "gemma-3-4b-it",
+  "displayName": "simuide-builder-tune",
+  "trainJsonl": "gs://demo-bucket/train.jsonl",
+  "evalJsonl": "gs://demo-bucket/eval.jsonl",
+  "outputDir": "gs://demo-bucket/output",
+  "ollamaModelName": "gemma3-simuide:v1"
+}

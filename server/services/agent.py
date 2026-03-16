@@ -196,6 +196,33 @@ def extract_json_object(text):
         return None
 
 
+def attempt_repair_json_payload(text):
+    """Best-effort repair for near-JSON model payloads."""
+    if not text:
+        return None
+    candidate = str(text).strip()
+
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", candidate, re.IGNORECASE)
+    if fenced:
+        candidate = fenced.group(1).strip()
+
+    # Keep the widest JSON object region if surrounding prose exists.
+    start = candidate.find("{")
+    end = candidate.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = candidate[start : end + 1]
+
+    # Remove trailing commas before closing object/list.
+    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+    # Normalize fancy quotes that occasionally appear in model output.
+    candidate = candidate.replace("“", '"').replace("”", '"').replace("’", "'")
+
+    try:
+        return json.loads(candidate)
+    except Exception:
+        return None
+
+
 def post_ollama_chat(model, system_instruction, user_payload, image_base64=None, temperature=0.2):
     base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     endpoint = f"{base_url.rstrip('/')}/api/chat"
@@ -246,9 +273,12 @@ def parse_ollama_json_payload(ollama_response):
         or ""
     )
     payload = extract_json_object(content)
-    if not payload:
-        raise RuntimeError("Local model did not return valid JSON action payload.")
-    return payload
+    if payload:
+        return payload, False
+    repaired = attempt_repair_json_payload(content)
+    if repaired:
+        return repaired, True
+    raise RuntimeError("Local model did not return valid JSON action payload.")
 
 
 def extract_actions_from_payload(payload):
@@ -720,13 +750,25 @@ void loop() {
     return [normalize_action(a) for a in actions]
 
 
-def safe_run_builder_agent(model, builder_instruction, prompt, history, canvas_state, image_base64):
+def safe_run_builder_agent(model, builder_instruction, prompt, history, canvas_state, image_base64, policy_variant="default"):
     try:
-        return run_builder_agent(model, builder_instruction, prompt, history, canvas_state, image_base64)
+        return run_builder_agent(
+            model,
+            builder_instruction,
+            prompt,
+            history,
+            canvas_state,
+            image_base64,
+            policy_variant=policy_variant,
+        )
     except Exception as exc:
         return {
             "text": f"Builder agent fallback due to model output parse error: {exc}",
             "actions": [],
+            "meta": {
+                "builderError": str(exc),
+                "parseRepairUsed": False,
+            },
         }
 
 
@@ -746,7 +788,7 @@ def run_conversation_agent(model, prompt, history, canvas_state, image_base64):
         "imageAttached": bool(image_base64),
     }
     response = post_ollama_chat(model, system_instruction, user_payload, image_base64=image_base64, temperature=0.3)
-    payload = parse_ollama_json_payload(response)
+    payload, _ = parse_ollama_json_payload(response)
     return {
         "assistant_reply": str(payload.get("assistant_reply", "")).strip(),
         "should_build": bool(payload.get("should_build", False)),
@@ -754,8 +796,8 @@ def run_conversation_agent(model, prompt, history, canvas_state, image_base64):
     }
 
 
-def run_builder_agent(model, builder_instruction, prompt, history, canvas_state, image_base64):
-    system_instruction = (
+def build_builder_system_instruction(policy_variant):
+    base = (
         "You are the Builder Agent for SimuIDE. Convert user intent to executable actions.\n"
         "Return JSON only:\n"
         '{"text":"short build summary","actions":[...]}.\n'
@@ -770,7 +812,24 @@ def run_builder_agent(model, builder_instruction, prompt, history, canvas_state,
         "3) Ensure every ADD_WIRE endpoint references a real component id/label from canvasState or a component you place in this same action list.\n"
         "4) If requirements are missing or ambiguous, return actions as [] and explain what detail is missing in text."
     )
+    variant = str(policy_variant or "").strip().lower()
+    if variant in ("strict-json-v2", "strict"):
+        return (
+            f"{base}\n"
+            "STRICT OUTPUT CONTRACT:\n"
+            "- Output must be a single JSON object and nothing else.\n"
+            "- Do not use markdown code fences.\n"
+            "- Ensure every action object includes a valid `type` in the allowed list.\n"
+            "- For ADD_WIRE, always include both `from` and `to` with 'componentRef:pinName'.\n"
+            "- If the user asks to build blinking LEDs, include UPDATE_CODE and usually VERIFY_BUILD + START_SIMULATION."
+        )
+    return base
+
+
+def run_builder_agent(model, builder_instruction, prompt, history, canvas_state, image_base64, policy_variant="default"):
+    system_instruction = build_builder_system_instruction(policy_variant)
     user_payload = {
+        "policyVariant": policy_variant,
         "builderInstruction": builder_instruction,
         "prompt": prompt,
         "history": history[-20:] if isinstance(history, list) else [],
@@ -778,20 +837,28 @@ def run_builder_agent(model, builder_instruction, prompt, history, canvas_state,
         "imageAttached": bool(image_base64),
     }
     response = post_ollama_chat(model, system_instruction, user_payload, image_base64=image_base64, temperature=0.2)
-    payload = parse_ollama_json_payload(response)
+    payload, parse_repair_used = parse_ollama_json_payload(response)
 
     actions = extract_actions_from_payload(payload)
     actions = apply_action_guardrails(actions, prompt, canvas_state)
     return {
         "text": str(payload.get("text", "")).strip(),
         "actions": actions,
+        "meta": {
+            "parseRepairUsed": bool(parse_repair_used),
+            "policyVariant": policy_variant,
+        },
     }
 
 
-def run_ollama_agent(prompt, canvas_state, image_base64, requested_model=None, history=None):
+def run_ollama_agent(prompt, canvas_state, image_base64, requested_model=None, history=None, policy_variant=None):
     model = requested_model or os.environ.get("OLLAMA_MODEL", "gemma3:latest")
+    policy_variant = policy_variant or os.environ.get("AI_PROMPT_POLICY", "default")
     history = history if isinstance(history, list) else []
     wants_actions = prompt_wants_actions(prompt)
+    retry_used = False
+    fallback_used = False
+    parse_repair_used = False
 
     # Critical behavior: action-oriented prompts should always go through the
     # builder pipeline so canvas interactions are not blocked by chat noise.
@@ -803,8 +870,11 @@ def run_ollama_agent(prompt, canvas_state, image_base64, requested_model=None, h
             history,
             canvas_state,
             image_base64,
+            policy_variant=policy_variant,
         )
+        parse_repair_used = parse_repair_used or bool(build_out.get("meta", {}).get("parseRepairUsed"))
         if not build_out["actions"]:
+            retry_used = True
             retry_instruction = (
                 f"{prompt}\n\n"
                 "IMPORTANT: Return a non-empty actions[] containing executable actions only."
@@ -816,8 +886,11 @@ def run_ollama_agent(prompt, canvas_state, image_base64, requested_model=None, h
                 history,
                 canvas_state,
                 image_base64,
+                policy_variant=policy_variant,
             )
+            parse_repair_used = parse_repair_used or bool(build_out.get("meta", {}).get("parseRepairUsed"))
         if not build_out["actions"]:
+            fallback_used = True
             build_out = {
                 "text": "Model output was incomplete; applied autonomous best-effort project plan.",
                 "actions": autonomous_project_actions(canvas_state, prompt),
@@ -826,6 +899,15 @@ def run_ollama_agent(prompt, canvas_state, image_base64, requested_model=None, h
             "success": True,
             "text": summarize_actions_for_user(build_out["actions"]),
             "actions": build_out["actions"],
+            "meta": {
+                "model": model,
+                "mode": "default",
+                "policyVariant": policy_variant,
+                "wantsActions": wants_actions,
+                "retryUsed": retry_used,
+                "fallbackUsed": fallback_used,
+                "parseRepairUsed": parse_repair_used,
+            },
         }
 
     convo = run_conversation_agent(model, prompt, history, canvas_state, image_base64)
@@ -840,10 +922,13 @@ def run_ollama_agent(prompt, canvas_state, image_base64, requested_model=None, h
             history,
             canvas_state,
             image_base64,
+            policy_variant=policy_variant,
         )
+        parse_repair_used = parse_repair_used or bool(build_out.get("meta", {}).get("parseRepairUsed"))
         actions = build_out["actions"]
         builder_text = build_out["text"]
         if not actions:
+            retry_used = True
             retry_instruction = (
                 f"{convo['builder_instruction'] or prompt}\n\n"
                 "IMPORTANT: Return a non-empty actions[] using only executable actions. "
@@ -857,12 +942,15 @@ def run_ollama_agent(prompt, canvas_state, image_base64, requested_model=None, h
                 history,
                 canvas_state,
                 image_base64,
+                policy_variant=policy_variant,
             )
+            parse_repair_used = parse_repair_used or bool(build_out.get("meta", {}).get("parseRepairUsed"))
             actions = build_out["actions"]
             if build_out["text"]:
                 builder_text = build_out["text"]
 
     if not actions and prompt_wants_actions(prompt):
+        fallback_used = True
         actions = autonomous_project_actions(canvas_state, prompt)
         if not builder_text:
             builder_text = "Applied autonomous best-effort planning from current canvas and intent."
@@ -885,12 +973,25 @@ def run_ollama_agent(prompt, canvas_state, image_base64, requested_model=None, h
         "success": True,
         "text": final_text,
         "actions": actions,
+        "meta": {
+            "model": model,
+            "mode": "default",
+            "policyVariant": policy_variant,
+            "wantsActions": wants_actions,
+            "retryUsed": retry_used,
+            "fallbackUsed": fallback_used,
+            "parseRepairUsed": parse_repair_used,
+        },
     }
 
 
-def run_canvas_json_agent(prompt, canvas_state, image_base64, requested_model=None, history=None):
+def run_canvas_json_agent(prompt, canvas_state, image_base64, requested_model=None, history=None, policy_variant=None):
     model = requested_model or os.environ.get("OLLAMA_MODEL", "gemma3:latest")
+    policy_variant = policy_variant or os.environ.get("AI_PROMPT_POLICY", "default")
     history = history if isinstance(history, list) else []
+    retry_used = False
+    fallback_used = False
+    parse_repair_used = False
     build_out = safe_run_builder_agent(
         model,
         prompt,
@@ -898,9 +999,12 @@ def run_canvas_json_agent(prompt, canvas_state, image_base64, requested_model=No
         history,
         canvas_state,
         image_base64,
+        policy_variant=policy_variant,
     )
+    parse_repair_used = parse_repair_used or bool(build_out.get("meta", {}).get("parseRepairUsed"))
     # Retry with stricter instruction if model returns empty actions.
     if not build_out["actions"]:
+        retry_used = True
         retry_instruction = (
             f"{prompt}\n\n"
             "IMPORTANT: Return at least one executable action in actions[]. "
@@ -914,8 +1018,11 @@ def run_canvas_json_agent(prompt, canvas_state, image_base64, requested_model=No
             history,
             canvas_state,
             image_base64,
+            policy_variant=policy_variant,
         )
+        parse_repair_used = parse_repair_used or bool(build_out.get("meta", {}).get("parseRepairUsed"))
     if not build_out["actions"]:
+        fallback_used = True
         build_out = {
             "text": "Canvas JSON planner returned no actions; autonomous planner generated actions.",
             "actions": autonomous_project_actions(canvas_state, prompt),
@@ -925,6 +1032,15 @@ def run_canvas_json_agent(prompt, canvas_state, image_base64, requested_model=No
         "success": True,
         "text": clean_reply_text(build_out["text"]) or summarize_actions_for_user(build_out["actions"]),
         "actions": build_out["actions"],
+        "meta": {
+            "model": model,
+            "mode": "canvas_json",
+            "policyVariant": policy_variant,
+            "wantsActions": True,
+            "retryUsed": retry_used,
+            "fallbackUsed": fallback_used,
+            "parseRepairUsed": parse_repair_used,
+        },
     }
 
 def main():
@@ -941,11 +1057,26 @@ def main():
         requested_model = data.get("model")
         history = data.get("history", [])
         mode = data.get("mode")
+        policy_variant = data.get("policyVariant")
 
         if mode == "canvas_json":
-            result = run_canvas_json_agent(prompt, canvas_state, image_base64, requested_model, history)
+            result = run_canvas_json_agent(
+                prompt,
+                canvas_state,
+                image_base64,
+                requested_model,
+                history,
+                policy_variant=policy_variant,
+            )
         else:
-            result = run_ollama_agent(prompt, canvas_state, image_base64, requested_model, history)
+            result = run_ollama_agent(
+                prompt,
+                canvas_state,
+                image_base64,
+                requested_model,
+                history,
+                policy_variant=policy_variant,
+            )
         print(json.dumps(result))
 
     except Exception as e:

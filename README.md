@@ -30,6 +30,9 @@ Create a `.env` file in the root directory (and `server/` directory if running b
 GEMINI_API_KEY=your_gemini_api_key_here
 MONGODB_URI=your_mongodb_atlas_connection_string
 PORT=3000
+# Optional overrides for local tool discovery:
+# ARDUINO_CLI_PATH=C:\Program Files\Arduino CLI\arduino-cli.exe
+# PYTHON_EXECUTABLE=C:\Users\<you>\AppData\Local\Programs\Python\Python313\python.exe
 ```
 
 ### 2. Frontend & Backend
@@ -51,6 +54,11 @@ source venv/bin/activate
 
 pip install -r requirements.txt
 ```
+
+### Windows Notes
+- Install Arduino CLI with `winget install ArduinoSA.CLI`.
+- Install Python 3 (includes `py` launcher by default).
+- If the backend cannot find either tool, set `ARDUINO_CLI_PATH` and `PYTHON_EXECUTABLE` in `server/.env`.
 
 ### 4. Running the Application
 Start both the Vite frontend and Expres backend using:

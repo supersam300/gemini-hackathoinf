@@ -5,7 +5,9 @@
     "main": "index.js",
     "scripts": {
         "start": "node index.js",
-        "dev": "node --watch index.js"
+        "dev": "node --watch index.js",
+        "ai:export-training": "node ../scripts/ai/export_training_data.cjs",
+        "ai:metrics": "node -e \"const { summarizeTelemetry } = require('./services/aiTelemetryStore'); console.log(JSON.stringify(summarizeTelemetry({ hours: 24 * 7 }), null, 2));\""
     },
     "dependencies": {
         "@google/genai": "^1.45.0",

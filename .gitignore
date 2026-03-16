@@ -137,3 +137,12 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Python cache
+**/__pycache__/
+*.pyc
+
+# AI runtime telemetry artifacts
+server/data/ai_telemetry.jsonl
+server/data/ai_feedback.jsonl
+server/data/training/*.jsonl

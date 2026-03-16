@@ -60,5 +60,8 @@ connectDB().then(() => {
         console.log(`     POST /api/ai/ingest`);
         console.log(`     POST /api/ai/search`);
         console.log(`     POST /api/ai/vision`);
+        console.log(`     POST /api/ai/feedback`);
+        console.log(`     GET  /api/ai/telemetry`);
+        console.log(`     GET  /api/ai/metrics`);
     });
 });
