@@ -50,3 +50,5 @@ images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO_NAME}/${_IMAGE_NAME}:latest
 
 timeout: 3600s
+options:
+  logging: CLOUD_LOGGING_ONLY
