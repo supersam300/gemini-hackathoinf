@@ -23,11 +23,15 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Install dependencies: arduino-cli, Python 3, and AVR core
+# Download the arduino-cli binary directly from a versioned tarball rather than
+# piping an external install script, so the output path is deterministic and
+# verifiable. --log-level warn prevents interactive prompts that would hang CI.
 RUN apk add --no-cache curl python3 py3-pip \
-    && curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh \
-    && mv ./bin/arduino-cli /usr/local/bin/ \
-    && arduino-cli core update-index \
-    && arduino-cli core install arduino:avr
+    && curl -fsSL "https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Linux_64bit.tar.gz" \
+       | tar -xz -C /usr/local/bin arduino-cli \
+    && arduino-cli version \
+    && arduino-cli core update-index --log-level warn \
+    && arduino-cli core install arduino:avr --log-level warn
 
 # Create python virtual environment and install requirements
 COPY requirements.txt .
@@ -40,8 +44,12 @@ COPY --from=builder /app/dist ./dist
 COPY server/ ./server/
 COPY package.json package-lock.json* ./
 
-# Install only production dependencies
+# Install root production dependencies (vite build tooling not included via --omit=dev)
 RUN npm ci --omit=dev
+
+# Install server-specific production dependencies (express, cors, mongoose, etc.)
+# The server/ directory has its own package.json and must be installed separately.
+RUN cd server && npm ci --omit=dev
 
 # Expose port (Matches server/index.js default)
 EXPOSE 3000
