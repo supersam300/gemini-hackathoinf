@@ -67,9 +67,9 @@ python scripts/ai/baseline_ab.py \
 Set in environment:
 
 ```env
-OLLAMA_MODEL=gemma3:latest
-OLLAMA_MODEL_CANDIDATE=gemma3-tuned:v1
-OLLAMA_CANARY_PERCENT=10
+GEMINI_AGENT_MODEL=gemini-1.5-flash
+GEMINI_AGENT_MODEL_CANDIDATE=gemini-1.5-pro
+GEMINI_AGENT_CANARY_PERCENT=10
 ```
 
 Routing is sticky by `sessionId`.

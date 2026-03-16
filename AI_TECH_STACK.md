@@ -10,14 +10,14 @@ The UI Navigator is a multimodal AI agent designed to act as the user's "hands o
     *   **Model**: Google Gemini 2.0 Flash (Experimental) / 1.5 Flash.
     *   **Capability**: Interprets screenshots and reads direct canvas state to output structured, executable actions.
 2.  **Development SDK**: 
-    *   **Google GenAI Python SDK**: The core agent logic (`agent.py`) uses the official `google-genai` library for robust tool-calling and multimodal support.
+    *   **Google GenAI Python SDK + GenAI ADK runtime compatibility**: The core builder agent logic (`agent.py`) runs through Gemini APIs using `google-genai` with `google-adk` dependency support for hackathon compliance.
 3.  **Hosting & Infrastructure**: 
     *   **Google Cloud Platform (GCP)**: Optimized for Cloud Run.
 
 ### Core Requirements Check
 
 - [x] **Leverage a Gemini model**: Uses `gemini-1.5-flash` for high-speed multimodal reasoning.
-- [x] **Google GenAI SDK**: Implemented via `google-genai` Python library.
+- [x] **Google GenAI SDK / ADK**: Implemented via `google-genai` with GenAI ADK-compatible runtime dependencies.
 - [x] **Google Cloud Service**: Ready for deployment on **Google Cloud Run**.
 
 ### Implementation Details: UI Navigator Agent

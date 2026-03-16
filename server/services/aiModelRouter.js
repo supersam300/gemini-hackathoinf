@@ -18,9 +18,20 @@ function resolveModelForSession({ requestedModel, sessionId }) {
     };
   }
 
-  const primary = process.env.OLLAMA_MODEL || "gemma3:latest";
-  const candidate = process.env.OLLAMA_MODEL_CANDIDATE || "";
-  const canaryPercent = Number(process.env.OLLAMA_CANARY_PERCENT || 0);
+  const primary =
+    process.env.GEMINI_AGENT_MODEL ||
+    process.env.GEMINI_MODEL ||
+    process.env.OLLAMA_MODEL ||
+    "gemini-1.5-flash";
+  const candidate =
+    process.env.GEMINI_AGENT_MODEL_CANDIDATE ||
+    process.env.OLLAMA_MODEL_CANDIDATE ||
+    "";
+  const canaryPercent = Number(
+    process.env.GEMINI_AGENT_CANARY_PERCENT ||
+    process.env.OLLAMA_CANARY_PERCENT ||
+    0
+  );
 
   if (!candidate || Number.isNaN(canaryPercent) || canaryPercent <= 0) {
     return {

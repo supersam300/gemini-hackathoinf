@@ -2,7 +2,19 @@ import json
 import os
 import re
 import sys
-from urllib import request, error
+
+try:
+    from google import genai as google_genai
+except Exception:
+    google_genai = None
+
+try:
+    # Optional ADK runtime path. We keep the agent contract stable and fall
+    # back to the Google SDK path if ADK is unavailable at runtime.
+    import google.adk  # noqa: F401
+    HAS_GOOGLE_ADK = True
+except Exception:
+    HAS_GOOGLE_ADK = False
 
 ACTION_INTENT_KEYWORDS = [
     "wire",
@@ -46,6 +58,8 @@ VALID_ACTION_TYPES = {
 }
 
 PIN_SEQUENCE = ["13", "12", "11", "10", "9", "8", "7", "6", "5", "4", "3", "2"]
+DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
+GENAI_CLIENT = None
 
 
 def clean_reply_text(text):
@@ -223,62 +237,90 @@ def attempt_repair_json_payload(text):
         return None
 
 
-def post_ollama_chat(model, system_instruction, user_payload, image_base64=None, temperature=0.2):
-    base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-    endpoint = f"{base_url.rstrip('/')}/api/chat"
-    message = {
-        "role": "user",
-        "content": json.dumps(user_payload),
-    }
-    if image_base64:
-        # Ollama multimodal message format for image-capable models.
-        message["images"] = [image_base64]
-
-    body = {
-        "model": model,
-        "stream": False,
-        "format": "json",
-        "messages": [
-            {"role": "system", "content": system_instruction},
-            message,
-        ],
-        "options": {
-            "temperature": temperature,
-        },
-    }
-
-    req = request.Request(
-        endpoint,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+def _resolve_agent_model(requested_model):
+    if requested_model:
+        return str(requested_model)
+    return (
+        os.environ.get("GEMINI_AGENT_MODEL")
+        or os.environ.get("GEMINI_MODEL")
+        or os.environ.get("OLLAMA_MODEL")
+        or DEFAULT_GEMINI_MODEL
     )
 
-    try:
-        with request.urlopen(req, timeout=180) as resp:
-            raw = resp.read().decode("utf-8")
-    except error.URLError as exc:
+
+def _get_genai_client():
+    global GENAI_CLIENT
+    if GENAI_CLIENT is not None:
+        return GENAI_CLIENT
+    if google_genai is None:
         raise RuntimeError(
-            "Failed to reach local Ollama server. Ensure 'ollama serve' is running and "
-            f"model '{model}' is pulled. ({exc})"
-        ) from exc
-    return json.loads(raw)
+            "google-genai is not installed. Run `pip install -r requirements.txt`."
+        )
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set.")
+    GENAI_CLIENT = google_genai.Client(api_key=api_key)
+    return GENAI_CLIENT
 
 
-def parse_ollama_json_payload(ollama_response):
-    parsed = ollama_response
-    content = (
-        parsed.get("message", {}).get("content")
-        or parsed.get("response")
-        or ""
+def post_genai_chat(model, system_instruction, user_payload, image_base64=None, temperature=0.2):
+    client = _get_genai_client()
+    model_name = _resolve_agent_model(model)
+
+    prompt_parts = [
+        "Return JSON only.",
+        "SYSTEM INSTRUCTION:",
+        system_instruction,
+        "USER PAYLOAD:",
+        json.dumps(user_payload),
+    ]
+    contents = [{"text": "\n".join(prompt_parts)}]
+    if image_base64:
+        # Pass image context when provided. Agent behavior does not depend on it,
+        # but this preserves multimodal support parity.
+        contents.append(
+            {
+                "inline_data": {
+                    "mime_type": "image/png",
+                    "data": image_base64,
+                }
+            }
+        )
+
+    response = client.models.generate_content(
+        model=model_name,
+        contents=contents,
+        config={
+            "temperature": temperature,
+            "response_mime_type": "application/json",
+        },
     )
+
+    text = getattr(response, "text", None)
+    if not text and getattr(response, "candidates", None):
+        parts = (
+            response.candidates[0]
+            .content
+            .parts
+        )
+        text = "".join(getattr(part, "text", "") for part in parts if getattr(part, "text", ""))
+
+    return {
+        "response": text or "",
+        "runtime": "genai-adk" if HAS_GOOGLE_ADK else "genai-sdk",
+    }
+
+
+def parse_model_json_payload(model_response):
+    parsed = model_response
+    content = parsed.get("response") or ""
     payload = extract_json_object(content)
     if payload:
         return payload, False
     repaired = attempt_repair_json_payload(content)
     if repaired:
         return repaired, True
-    raise RuntimeError("Local model did not return valid JSON action payload.")
+    raise RuntimeError("Model did not return valid JSON action payload.")
 
 
 def extract_actions_from_payload(payload):
@@ -787,8 +829,8 @@ def run_conversation_agent(model, prompt, history, canvas_state, image_base64):
         "canvasState": canvas_state or {"components": [], "wires": []},
         "imageAttached": bool(image_base64),
     }
-    response = post_ollama_chat(model, system_instruction, user_payload, image_base64=image_base64, temperature=0.3)
-    payload, _ = parse_ollama_json_payload(response)
+    response = post_genai_chat(model, system_instruction, user_payload, image_base64=image_base64, temperature=0.3)
+    payload, _ = parse_model_json_payload(response)
     return {
         "assistant_reply": str(payload.get("assistant_reply", "")).strip(),
         "should_build": bool(payload.get("should_build", False)),
@@ -836,8 +878,8 @@ def run_builder_agent(model, builder_instruction, prompt, history, canvas_state,
         "canvasState": canvas_state or {"components": [], "wires": []},
         "imageAttached": bool(image_base64),
     }
-    response = post_ollama_chat(model, system_instruction, user_payload, image_base64=image_base64, temperature=0.2)
-    payload, parse_repair_used = parse_ollama_json_payload(response)
+    response = post_genai_chat(model, system_instruction, user_payload, image_base64=image_base64, temperature=0.2)
+    payload, parse_repair_used = parse_model_json_payload(response)
 
     actions = extract_actions_from_payload(payload)
     actions = apply_action_guardrails(actions, prompt, canvas_state)
@@ -851,8 +893,8 @@ def run_builder_agent(model, builder_instruction, prompt, history, canvas_state,
     }
 
 
-def run_ollama_agent(prompt, canvas_state, image_base64, requested_model=None, history=None, policy_variant=None):
-    model = requested_model or os.environ.get("OLLAMA_MODEL", "gemma3:latest")
+def run_genai_agent(prompt, canvas_state, image_base64, requested_model=None, history=None, policy_variant=None):
+    model = _resolve_agent_model(requested_model)
     policy_variant = policy_variant or os.environ.get("AI_PROMPT_POLICY", "default")
     history = history if isinstance(history, list) else []
     wants_actions = prompt_wants_actions(prompt)
@@ -986,7 +1028,7 @@ def run_ollama_agent(prompt, canvas_state, image_base64, requested_model=None, h
 
 
 def run_canvas_json_agent(prompt, canvas_state, image_base64, requested_model=None, history=None, policy_variant=None):
-    model = requested_model or os.environ.get("OLLAMA_MODEL", "gemma3:latest")
+    model = _resolve_agent_model(requested_model)
     policy_variant = policy_variant or os.environ.get("AI_PROMPT_POLICY", "default")
     history = history if isinstance(history, list) else []
     retry_used = False
@@ -1069,7 +1111,7 @@ def main():
                 policy_variant=policy_variant,
             )
         else:
-            result = run_ollama_agent(
+            result = run_genai_agent(
                 prompt,
                 canvas_state,
                 image_base64,

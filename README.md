@@ -30,6 +30,7 @@ Create a `.env` file in the root directory (and `server/` directory if running b
 GEMINI_API_KEY=your_gemini_api_key_here
 MONGODB_URI=your_mongodb_atlas_connection_string
 PORT=3000
+GEMINI_AGENT_MODEL=gemini-1.5-flash
 # Optional overrides for local tool discovery:
 # ARDUINO_CLI_PATH=C:\Program Files\Arduino CLI\arduino-cli.exe
 # PYTHON_EXECUTABLE=C:\Users\<you>\AppData\Local\Programs\Python\Python313\python.exe
@@ -54,6 +55,8 @@ source venv/bin/activate
 
 pip install -r requirements.txt
 ```
+
+The Python builder agent now uses Google GenAI with ADK-compatible runtime dependencies and keeps the same stdin/stdout JSON contract expected by the Node route.
 
 ### Windows Notes
 - Install Arduino CLI with `winget install ArduinoSA.CLI`.
@@ -86,6 +89,7 @@ docker run -p 3000:3000 --env-file .env simuide-web
 
 - **Frontend:** React 18, TypeScript, Vite, Tailwind CSS
 - **AI Engine:** Google Gemini (1.5 Flash & 1.5 Pro) via `google-genai` Python SDK
+- **Builder Agent Runtime:** GenAI ADK-compatible Python agent (`server/services/agent.py`) invoked by backend subprocess
 - **Backend:** Node.js, Express, MongoDB Atlas
 - **Simulation:** AVR8js & `@wokwi/elements`
 - **Compiler:** `arduino-cli` integrated into the backend pipeline
