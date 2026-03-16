@@ -647,6 +647,140 @@ def _find_power_source_ref(ref_to_type, valid_refs):
     return ""
 
 
+def _collect_component_instances(canvas_state, actions):
+    """Collect stable component refs (prefer label, then id) with type."""
+    instances = []
+    seen = set()
+
+    components = canvas_state.get("components", []) if isinstance(canvas_state, dict) else []
+    for comp in components:
+        if not isinstance(comp, dict):
+            continue
+        ctype = str(
+            comp.get("type")
+            or comp.get("componentType")
+            or comp.get("name")
+            or ""
+        ).strip().lower()
+        if not ctype:
+            continue
+        ref = str(comp.get("label") or comp.get("id") or "").strip().lower()
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        instances.append({"ref": ref, "type": ctype})
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        if str(action.get("type", "")).upper() != "PLACE_COMPONENT":
+            continue
+        ctype = str(
+            action.get("componentType")
+            or action.get("component")
+            or action.get("name")
+            or ""
+        ).strip().lower()
+        if not ctype:
+            continue
+        ref = str(action.get("label") or action.get("id") or "").strip().lower()
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        instances.append({"ref": ref, "type": ctype})
+
+    return instances
+
+
+def _component_has_pin_connection(wire_tuples, comp_ref, pin_aliases):
+    aliases = {str(a).strip().lower() for a in pin_aliases if str(a).strip()}
+    for f_ref, f_pin, t_ref, t_pin in wire_tuples:
+        if f_ref == comp_ref and str(f_pin).strip().lower() in aliases:
+            return True
+        if t_ref == comp_ref and str(t_pin).strip().lower() in aliases:
+            return True
+    return False
+
+
+def _components_are_connected(wire_tuples, ref_a, ref_b):
+    for f_ref, _, t_ref, _ in wire_tuples:
+        if (f_ref == ref_a and t_ref == ref_b) or (f_ref == ref_b and t_ref == ref_a):
+            return True
+    return False
+
+
+def _component_connected_to_arduino(wire_tuples, comp_ref, arduino_ref):
+    return _components_are_connected(wire_tuples, comp_ref, arduino_ref)
+
+
+def _auto_complete_wiring(actions, canvas_state):
+    """
+    Complete common partial plans so each LED path is electrically closed.
+    Pattern enforced: Arduino Pin -> Resistor -> LED(A), LED(C) -> Arduino GND.
+    """
+    if not actions:
+        return actions
+
+    wire_tuples = _collect_wire_tuples(canvas_state, actions)
+    instances = _collect_component_instances(canvas_state, actions)
+    if not instances:
+        return actions
+
+    arduino_refs = [c["ref"] for c in instances if "arduino" in c["type"]]
+    led_refs = [c["ref"] for c in instances if "led" in c["type"]]
+    resistor_refs = [c["ref"] for c in instances if "resistor" in c["type"]]
+    if not led_refs:
+        return actions
+
+    arduino_ref = arduino_refs[0] if arduino_refs else ""
+
+    def append_wire(from_ref, from_pin, to_ref, to_pin):
+        if not from_ref or not to_ref:
+            return
+        if _wire_exists(wire_tuples, from_ref, from_pin, to_ref, to_pin):
+            return
+        actions.append({
+            "type": "ADD_WIRE",
+            "from": f"{from_ref}:{from_pin}",
+            "to": f"{to_ref}:{to_pin}",
+        })
+        wire_tuples.append((from_ref, str(from_pin).lower(), to_ref, str(to_pin).lower()))
+
+    for idx, led_ref in enumerate(led_refs):
+        # Ensure LED cathode is grounded.
+        has_led_ground = _component_has_pin_connection(
+            wire_tuples,
+            led_ref,
+            {"c", "cathode", "k", "gnd"},
+        )
+        if not has_led_ground and arduino_ref:
+            append_wire(led_ref, "C", arduino_ref, "GND")
+
+        # Ensure LED anode has a drive path.
+        has_led_anode = _component_has_pin_connection(
+            wire_tuples,
+            led_ref,
+            {"a", "anode", "vcc", "pos", "+"},
+        )
+        if has_led_anode:
+            continue
+
+        if idx < len(resistor_refs):
+            resistor_ref = resistor_refs[idx]
+            # Resistor -> LED anode
+            append_wire(resistor_ref, "2", led_ref, "A")
+            # Arduino -> resistor input
+            if arduino_ref and not _component_connected_to_arduino(wire_tuples, resistor_ref, arduino_ref):
+                pin = PIN_SEQUENCE[idx % len(PIN_SEQUENCE)]
+                append_wire(arduino_ref, pin, resistor_ref, "1")
+        elif arduino_ref:
+            # No resistor available; at least close the signal path.
+            pin = PIN_SEQUENCE[idx % len(PIN_SEQUENCE)]
+            append_wire(arduino_ref, pin, led_ref, "A")
+
+    return actions
+
+
 def apply_action_guardrails(actions, prompt, canvas_state):
     if not isinstance(actions, list):
         return []
@@ -738,6 +872,7 @@ def apply_action_guardrails(actions, prompt, canvas_state):
                     })
                     wire_tuples.append((power_source_ref, "5v", comp_ref, "vcc"))
 
+    final_actions = _auto_complete_wiring(final_actions, canvas_state)
     return final_actions
 
 

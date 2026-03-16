@@ -582,6 +582,7 @@ export default function App() {
         .filter((a: any) => a && typeof a === 'object');
 
       const norm = (v: unknown) => String(v || '').trim().toLowerCase();
+      const alnum = (v: unknown) => norm(v).replace(/[^a-z0-9]/g, '');
       const sanitizeToken = (v: unknown) => String(v || '')
         .replace(/[\{\}\[\]]/g, '')
         .replace(/^["']|["']$/g, '')
@@ -596,6 +597,17 @@ export default function App() {
         const col = sameTypeCount % 4;
         const row = Math.floor(sameTypeCount / 4);
         return { x: 180 + col * 120, y: 120 + row * 90 };
+      };
+      const parseTypeHint = (token: string): { type: string; ordinal: number | null } | null => {
+        const t = token.toLowerCase().replace(/[_-]+/g, ' ').trim();
+        const m = t.match(/^(arduino(?:\s*uno)?|uno|led|resistor|battery|gnd|vcc)\s*#?\s*(\d+)?$/);
+        if (!m) return null;
+        const rawType = m[1];
+        const mappedType = normalizeComponentType(rawType);
+        return {
+          type: mappedType,
+          ordinal: m[2] ? Math.max(1, Number.parseInt(m[2], 10)) : null,
+        };
       };
       const resolveComponentId = (ref: unknown): string | null => {
         const token = sanitizeToken(ref);
@@ -612,7 +624,25 @@ export default function App() {
           c.label.toLowerCase() === n ||
           c.type.toLowerCase() === n
         );
-        return ci?.id || null;
+        if (ci?.id) return ci.id;
+        // compare with punctuation removed (e.g. "R-1" vs "R1")
+        const nAlnum = alnum(token);
+        const fuzzy = nextComponents.find(c =>
+          alnum(c.id) === nAlnum ||
+          alnum(c.label) === nAlnum ||
+          alnum(c.type) === nAlnum
+        );
+        if (fuzzy?.id) return fuzzy.id;
+        // Handle tokens like "resistor 2", "led1", "uno"
+        const hinted = parseTypeHint(token.replace(/\s+(pin|leg|terminal)\s*\w*$/i, '').replace(/[:.].*$/, ''));
+        if (hinted) {
+          const ofType = nextComponents.filter(c => normalizeComponentType(c.type) === hinted.type);
+          if (ofType.length > 0) {
+            if (hinted.ordinal && ofType[hinted.ordinal - 1]) return ofType[hinted.ordinal - 1].id;
+            return ofType[0].id;
+          }
+        }
+        return null;
       };
       const normalizePin = (pin: string) => {
         const raw = String(pin || '').trim();
@@ -653,6 +683,12 @@ export default function App() {
           const idx = s.lastIndexOf('.');
           compRef = s.slice(0, idx).trim();
           pinRef = s.slice(idx + 1).trim();
+        } else {
+          const m = s.match(/^(.+?)\s+(?:pin|leg|terminal)?\s*([a-z0-9.+-]+)$/i);
+          if (m) {
+            compRef = m[1].trim();
+            pinRef = m[2].trim();
+          }
         }
         const compId = resolveComponentId(compRef);
         if (!compId) return null;
@@ -662,16 +698,38 @@ export default function App() {
       };
 
       const parseEndpointFromAction = (action: any, side: 'from' | 'to') => {
-        const endpointRaw = action?.[side] ?? action?.[side.toUpperCase()];
+        const sideU = side.toUpperCase();
+        const endpointRaw =
+          action?.[side] ??
+          action?.[sideU] ??
+          action?.[side === 'from' ? 'source' : 'target'] ??
+          action?.[side === 'from' ? 'SOURCE' : 'TARGET'] ??
+          action?.[side === 'from' ? 'start' : 'end'] ??
+          action?.[side === 'from' ? 'START' : 'END'];
         if (typeof endpointRaw === 'object' && endpointRaw !== null) {
-          const compRef = endpointRaw.componentId || endpointRaw.component || endpointRaw.id || endpointRaw.label || endpointRaw.ID || endpointRaw.LABEL;
-          const pin = endpointRaw.pin || endpointRaw.pinName || endpointRaw.handle || endpointRaw.PIN || endpointRaw.PINNAME;
+          const compRef =
+            endpointRaw.componentId || endpointRaw.component || endpointRaw.id || endpointRaw.label ||
+            endpointRaw.componentRef || endpointRaw.ref || endpointRaw.node ||
+            endpointRaw.ID || endpointRaw.LABEL;
+          const pin =
+            endpointRaw.pin || endpointRaw.pinName || endpointRaw.handle || endpointRaw.terminal ||
+            endpointRaw.PIN || endpointRaw.PINNAME;
           if (!compRef) return null;
           return parseEndpoint(`${compRef}:${pin || ''}`, side);
         }
         if (!endpointRaw) {
-          const compRef = action?.[`${side}ComponentId`] || action?.[`${side}Id`] || action?.[`${side}Label`] || action?.[`${side.toUpperCase()}COMPONENTID`] || action?.[`${side.toUpperCase()}ID`];
-          const pin = action?.[`${side}Pin`] || action?.[`${side}PinName`] || action?.[`${side}Handle`] || action?.[`${side.toUpperCase()}PIN`];
+          const compRef =
+            action?.[`${side}ComponentId`] || action?.[`${side}Id`] || action?.[`${side}Label`] ||
+            action?.[`${side}Component`] || action?.[`${side}Ref`] ||
+            action?.[`${sideU}COMPONENTID`] || action?.[`${sideU}ID`] || action?.[`${sideU}COMPONENT`] ||
+            action?.[side === 'from' ? 'sourceComponent' : 'targetComponent'] ||
+            action?.[side === 'from' ? 'sourceId' : 'targetId'] ||
+            action?.[side === 'from' ? 'startComponent' : 'endComponent'];
+          const pin =
+            action?.[`${side}Pin`] || action?.[`${side}PinName`] || action?.[`${side}Handle`] ||
+            action?.[`${sideU}PIN`] || action?.[`${sideU}PINNAME`] ||
+            action?.[side === 'from' ? 'sourcePin' : 'targetPin'] ||
+            action?.[side === 'from' ? 'startPin' : 'endPin'];
           if (!compRef) return null;
           return parseEndpoint(`${compRef}:${pin || ''}`, side);
         }
