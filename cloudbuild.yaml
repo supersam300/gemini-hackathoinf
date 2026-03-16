@@ -41,7 +41,7 @@ steps:
       - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO_NAME}/${_IMAGE_NAME}:$SHORT_SHA
       - --region=${_REGION}
       - --platform=managed
-      - --allow-unauthenticated=${_ALLOW_UNAUTHENTICATED}
+      - --allow-unauthenticated
       - --set-env-vars=NODE_ENV=production,PORT=3000,GEMINI_AGENT_MODEL=${_GEMINI_AGENT_MODEL}
       - --set-secrets=GEMINI_API_KEY=${_GEMINI_API_KEY_SECRET}:latest,MONGODB_URI=${_MONGODB_URI_SECRET}:latest
 
