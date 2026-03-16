@@ -6,7 +6,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    container_name: gemini-hackathon-dev
+    container_namein.
+    
+    running wslexec: The operation timed out because a response was not received from the virtual machine or container. Wsl/Service/RegisterDistro/CreateVm/HCS_E_CONNECTION_TIMEOUT: c:\windows\system32\wsl.exe --import-in-place docker-desktop <home>\appdata\local\docker\wsl\main\ext4.vhdx: exit status 0xffffffff (stderr: , wslErrorCode: Wsl/Service/RegisterDistro/CreateVm/HCS_E_CONNECTION_TIMEOUT): gemini-hackathon-dev
     ports:
       - "5173:5173"
     volumes:

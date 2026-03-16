@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  Send, ChevronRight, Bot, User, Code2,
+  Send, ChevronRight, User, Code2,
   Zap, Clipboard, RotateCcw, PanelRightClose, PanelRightOpen,
-  Camera
+  Camera, Plus, Sparkles, MoreHorizontal, History
 } from 'lucide-react';
 
 export interface ChatMessage {
@@ -19,6 +19,7 @@ interface AIPanelProps {
   onVisualQA?: (prompt: string) => void;
   onBuild?: () => void;
   onCanvasJsonInteract?: (prompt: string, model?: string) => void;
+  onClearChat?: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
   darkMode?: boolean;
@@ -32,12 +33,16 @@ const suggestedPrompts = [
 ];
 
 const localModels = [
-  { id: 'gemma3:latest', label: 'Gemma 3', tag: 'Local (Ollama)' },
-  { id: 'gemma3:4b', label: 'Gemma 3 4B', tag: 'Local (Ollama)' },
-  { id: 'gemma3:12b', label: 'Gemma 3 12B', tag: 'Local (Ollama)' },
+  { id: 'gemma3:latest', label: 'Gemma 3', tag: 'Local' },
+  { id: 'gemma3:4b', label: 'Gemma 3 4B', tag: 'Local' },
+  { id: 'gemma3:12b', label: 'Gemma 3 12B', tag: 'Local' },
 ];
 
-export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, onCanvasJsonInteract, collapsed, onToggleCollapse, darkMode }: AIPanelProps) {
+export function AIPanel({ 
+  messages, onSendMessage, onVisualQA, onBuild, 
+  onCanvasJsonInteract, onClearChat, collapsed, 
+  onToggleCollapse, darkMode 
+}: AIPanelProps) {
   const dm = darkMode;
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -65,20 +70,21 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, onCanvas
     }
   };
 
-  // Collapsed: just show a thin vertical tab to re-open
   if (collapsed) {
     return (
-      <div className={`shrink-0 flex flex-col items-center border-l w-[36px] ${dm ? 'bg-[#1e1e1e] border-[#333]' : 'bg-[#f0f0f2] border-[#d0d0d0]'}`}>
+      <div className={`shrink-0 flex flex-col items-center border-l w-[44px] transition-all duration-300 ${dm ? 'bg-[#0f0f10] border-[#222]' : 'bg-[#f8f9fa] border-[#e0e0e0]'}`}>
         <button
           onClick={onToggleCollapse}
-          className={`mt-2 p-1.5 rounded transition-colors ${dm ? 'hover:bg-[#333] text-[#999]' : 'hover:bg-[#e0e0e0] text-[#666]'}`}
-          title="Open AI Panel"
+          className={`mt-4 w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300 group relative
+            ${dm ? 'hover:bg-[#222]' : 'hover:bg-[#eee]'}`}
+          title="Open Gemini AI"
         >
-          <PanelRightOpen size={16} />
+          <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl blur opacity-0 group-hover:opacity-20 transition duration-500"></div>
+          <Sparkles size={20} className="text-blue-500 group-hover:scale-110 transition-transform" />
         </button>
-        <div className="flex-1 flex items-center justify-center">
-          <p className={`text-[11px] whitespace-nowrap ${dm ? 'text-[#777]' : 'text-[#aaa]'}`} style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
-            Local AI Agent
+        <div className="flex-1 flex items-center justify-center pt-4">
+          <p className={`text-[10px] font-bold tracking-[0.2em] whitespace-nowrap ${dm ? 'text-[#333]' : 'text-[#ccc]'}`} style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+            GEMINI AI
           </p>
         </div>
       </div>
@@ -87,117 +93,142 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, onCanvas
 
   return (
     <div
-      className={`w-[300px] shrink-0 flex flex-col overflow-hidden shadow-sm ${dm ? 'bg-[#1e1e1e] border-l border-[#333]' : 'bg-[#fafafa] border-l border-[#d0d0d0]'}`}
-      style={{ fontFamily: 'Inter, system-ui, -apple-system, sans-serif' }}
+      className={`w-[320px] shrink-0 flex flex-col overflow-hidden shadow-2xl transition-all duration-300 ${dm ? 'bg-[#0f0f10] border-l border-[#222]' : 'bg-[#ffffff] border-l border-[#e5e7eb]'}`}
+      style={{ fontFamily: 'Outfit, Inter, system-ui, sans-serif' }}
     >
-      {/* Panel Header */}
-      <div className={`flex items-center h-[34px] px-3 border-b shrink-0 ${dm ? 'bg-gradient-to-r from-[#2a2a2a] to-[#252525] border-[#333]' : 'bg-gradient-to-r from-[#f0f0f0] to-[#e8e8e8] border-[#c8c8c8]'}`}>
-        <div className="flex items-center gap-2">
-          <div className="w-[20px] h-[20px] rounded-full bg-gradient-to-br from-[#4285f4] to-[#8b5cf6] flex items-center justify-center shadow-sm">
-            <Bot size={11} className="text-white" />
+      {/* Premium Header */}
+      <div className={`flex items-center justify-between h-[56px] px-4 shrink-0 border-b ${dm ? 'border-[#222]' : 'border-[#f1f1f1]'}`}>
+        <div className="flex items-center gap-2.5">
+          <div className="relative group">
+            <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full blur opacity-40 group-hover:opacity-60 transition duration-1000 group-hover:duration-200"></div>
+            <div className={`relative w-[28px] h-[28px] flex items-center justify-center`}>
+              <Sparkles size={20} className="text-blue-500 group-hover:text-blue-400 transition-colors" />
+            </div>
+            <div className="absolute top-0 right-0 w-2 h-2 rounded-full bg-emerald-500 border-2 border-black" />
           </div>
-          <span className={`text-[12px] font-semibold ${dm ? 'text-[#e0e0e0]' : 'text-[#1a1a1a]'}`}>Local AI Agent</span>
-          <div className="w-2 h-2 rounded-full bg-emerald-500 ml-0.5 animate-pulse" title="Online" />
+          <div className="flex flex-col">
+            <span className={`text-[13px] font-bold tracking-tight ${dm ? 'text-white' : 'text-[#1a1a1b]'}`}>Gemini AI</span>
+            <div className="flex items-center gap-1">
+               <span className="text-[9px] font-medium text-emerald-500 uppercase tracking-widest">Active</span>
+            </div>
+          </div>
         </div>
-        <div className="ml-auto flex items-center gap-1">
+        
+        <div className="flex items-center gap-1">
           <button
-            className={`p-1 rounded ${dm ? 'hover:bg-[#333] text-[#999]' : 'hover:bg-[#ddd] text-[#666]'}`}
-            onClick={onToggleCollapse}
-            title="Close Panel"
+            onClick={onClearChat}
+            className={`p-2 rounded-lg transition-all duration-200 ${dm ? 'hover:bg-[#222] text-[#888] hover:text-white' : 'hover:bg-[#f3f4f6] text-[#666] hover:text-[#111]'}`}
+            title="Start New Chat"
           >
-            <PanelRightClose size={14} />
+            <Plus size={16} />
+          </button>
+          <button
+            className={`p-2 rounded-lg transition-all duration-200 ${dm ? 'hover:bg-[#222] text-[#888] hover:text-white' : 'hover:bg-[#f3f4f6] text-[#666] hover:text-[#111]'}`}
+            onClick={onToggleCollapse}
+            title="Collapse"
+          >
+            <PanelRightClose size={16} />
           </button>
         </div>
       </div>
 
-      {/* Model/Context badge */}
-      <div className={`flex items-center gap-2 px-3 py-2 border-b shrink-0 ${dm ? 'bg-[#252525] border-[#333]' : 'bg-[#f5f5f7] border-[#e4e4e4]'}`}>
-        <span className={`text-[10px] font-medium ${dm ? 'text-[#777]' : 'text-[#999]'}`}>Model:</span>
+      {/* Modern Model Selector */}
+      <div className={`px-4 py-2 flex items-center justify-between ${dm ? 'bg-[#161618]/50' : 'bg-gray-50/50'}`}>
+        <div className="flex items-center gap-2">
+          <div className={`px-2 py-1 rounded-md border text-[10px] font-bold uppercase tracking-wider ${dm ? 'bg-[#222] border-[#333] text-gray-400' : 'bg-white border-gray-200 text-gray-500'}`}>
+            {selectedModel.split(':')[0]}
+          </div>
+        </div>
         <select
           value={selectedModel}
           onChange={(e) => setSelectedModel(e.target.value)}
-          className={`text-[10px] border px-1.5 py-0.5 rounded shadow-sm outline-none cursor-pointer hover:border-[#1565c0] focus:border-[#1565c0] focus:ring-1 focus:ring-[#1565c0]/20 transition-colors ${dm ? 'bg-[#2a2a2a] border-[#444] text-[#ccc]' : 'bg-white border-[#d4d4d4] text-[#555]'}`}
+          className={`text-[11px] font-medium bg-transparent outline-none cursor-pointer ${dm ? 'text-gray-400 hover:text-white' : 'text-gray-600 hover:text-black'}`}
         >
           {localModels.map(m => (
-            <option key={m.id} value={m.id}>
-              {m.label} ({m.tag})
+            <option key={m.id} value={m.id} className={dm ? 'bg-[#161618]' : 'bg-white'}>
+              {m.label}
             </option>
           ))}
         </select>
-
       </div>
 
-      {/* Messages area */}
+      {/* Messages area with Glassmorphism influence */}
       <div
-        className="flex-1 overflow-y-auto px-3 py-3 space-y-3"
-        style={{ scrollbarWidth: 'thin', scrollbarColor: '#c0c0c0 transparent' }}
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-6"
+        style={{ 
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none'
+        }}
       >
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+            className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
           >
-            {/* Role label */}
-            <div className={`flex items-center gap-1.5 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+            <div className={`flex items-center gap-2 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
               <div
-                className={`w-[18px] h-[18px] rounded-full flex items-center justify-center shrink-0 ${
+                className={`w-[22px] h-[22px] rounded-full flex items-center justify-center ring-2 shrink-0 ${
                   msg.role === 'ai'
-                    ? 'bg-gradient-to-br from-[#4285f4] to-[#8b5cf6]'
-                    : 'bg-[#1565c0]'
+                    ? 'bg-gradient-to-br from-blue-600 to-indigo-600 ring-blue-500/20'
+                    : 'bg-[#333] ring-gray-500/20'
                 }`}
               >
-                {msg.role === 'ai' ? <Bot size={10} className="text-white" /> : <User size={10} className="text-white" />}
+                {msg.role === 'ai' ? <Sparkles size={11} className="text-white" /> : <User size={11} className="text-white" />}
               </div>
-              <span className={`text-[10px] ${dm ? 'text-[#777]' : 'text-[#999]'}`}>{msg.timestamp}</span>
+              <span className={`text-[10px] font-medium ${dm ? 'text-[#555]' : 'text-[#999]'}`}>{msg.timestamp}</span>
             </div>
 
-            {/* Message bubble */}
             <div
-              className={`max-w-[240px] px-3 py-2.5 text-[12px] leading-relaxed shadow-sm ${
+              className={`relative group px-4 py-3 text-[13px] leading-[1.6] shadow-sm max-w-[90%] ${
                 msg.role === 'ai'
-                  ? dm ? 'bg-[#2a2a1e] border border-[#4a4520] text-[#e0d080] rounded-[8px] rounded-tl-[2px]' : 'bg-[#fffef5] border border-[#ece3a0] text-[#3a3200] rounded-[8px] rounded-tl-[2px]'
-                  : 'bg-gradient-to-br from-[#1565c0] to-[#1255a3] text-white rounded-[8px] rounded-tr-[2px]'
+                  ? dm 
+                    ? 'bg-[#161618] border border-white/5 text-[#d1d5db] rounded-2xl rounded-tl-none' 
+                    : 'bg-white border border-gray-100 text-[#374151] rounded-2xl rounded-tl-none ring-1 ring-black/[0.02]'
+                  : 'bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-2xl rounded-tr-none shadow-blue-500/10'
               }`}
             >
               {msg.isCode ? (
-                <pre className="font-mono text-[10px] overflow-x-auto whitespace-pre-wrap">{msg.content}</pre>
+                <div className="relative">
+                  <pre className={`font-mono text-[11px] overflow-x-auto p-3 rounded-lg my-1 ${dm ? 'bg-black/40' : 'bg-gray-900 text-gray-100'}`}>
+                    <code>{msg.content}</code>
+                  </pre>
+                  <button 
+                    onClick={() => navigator.clipboard.writeText(msg.content)}
+                    className="absolute top-2 right-2 p-1.5 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
+                  >
+                    <Clipboard size={12} className="text-white/70" />
+                  </button>
+                </div>
               ) : (
-                msg.content
+                <div className="whitespace-pre-wrap">{msg.content}</div>
+              )}
+              
+              {msg.role === 'ai' && (
+                <div className="absolute -bottom-6 flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200 left-0">
+                  <button onClick={() => navigator.clipboard.writeText(msg.content)} className={`p-1 hover:text-blue-500 transition-colors ${dm ? 'text-gray-600' : 'text-gray-400'}`}>
+                    <Clipboard size={12} />
+                  </button>
+                  <button className={`p-1 hover:text-blue-500 transition-colors ${dm ? 'text-gray-600' : 'text-gray-400'}`}>
+                    <RotateCcw size={12} />
+                  </button>
+                </div>
               )}
             </div>
-
-            {/* AI message actions */}
-            {msg.role === 'ai' && (
-              <div className="flex items-center gap-2 ml-1">
-                <button
-                  className={`flex items-center gap-1 text-[10px] ${dm ? 'text-[#666] hover:text-[#ccc]' : 'text-[#aaa] hover:text-[#666]'}`}
-                  title="Copy"
-                  onClick={() => {
-                    navigator.clipboard.writeText(msg.content);
-                  }}
-                >
-                  <Clipboard size={10} />
-                  Copy
-                </button>
-                <button className={`flex items-center gap-1 text-[10px] ${dm ? 'text-[#666] hover:text-[#ccc]' : 'text-[#aaa] hover:text-[#666]'}`} title="Regenerate">
-                  <RotateCcw size={10} />
-                </button>
-              </div>
-            )}
           </div>
         ))}
 
-        {/* Typing indicator */}
         {isTyping && (
-          <div className="flex items-start gap-1.5">
-            <div className="w-[18px] h-[18px] rounded-full bg-gradient-to-br from-[#4285f4] to-[#8b5cf6] flex items-center justify-center shrink-0">
-              <Bot size={10} className="text-white" />
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-[22px] h-[22px] rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center ring-2 ring-blue-500/20">
+                <Sparkles size={11} className="text-white" />
+              </div>
             </div>
-            <div className={`border px-3 py-2 rounded-[4px] rounded-tl-none ${dm ? 'bg-[#2a2a1e] border-[#4a4520]' : 'bg-[#fefce8] border-[#e9d66b]'}`}>
-              <div className="flex gap-1 items-center h-4">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#888] animate-bounce" style={{ animationDelay: '0ms' }} />
-                <div className="w-1.5 h-1.5 rounded-full bg-[#888] animate-bounce" style={{ animationDelay: '150ms' }} />
-                <div className="w-1.5 h-1.5 rounded-full bg-[#888] animate-bounce" style={{ animationDelay: '300ms' }} />
+            <div className={`w-[60px] h-[34px] flex items-center justify-center rounded-2xl rounded-tl-none ${dm ? 'bg-[#161618] border border-white/5' : 'bg-white border border-gray-100'}`}>
+              <div className="flex gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500/60 animate-bounce [animation-delay:-0.3s]" />
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500/60 animate-bounce [animation-delay:-0.15s]" />
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500/60 animate-bounce" />
               </div>
             </div>
           </div>
@@ -205,80 +236,79 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, onCanvas
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Suggested prompts */}
-      <div className={`px-3 pb-2 flex flex-wrap gap-1.5 shrink-0 border-t pt-2 ${dm ? 'border-[#333]' : 'border-[#e0e0e0]'}`}>
-        <span className={`w-full text-[10px] mb-0.5 flex items-center gap-1 ${dm ? 'text-[#666]' : 'text-[#aaa]'}`}><Zap size={9} />Quick actions:</span>
-        {suggestedPrompts.map((p) => (
-          <button
-            key={p}
-            className={`text-[10px] px-2 py-0.5 border rounded-full transition-colors ${dm ? 'border-[#444] bg-[#2a2a2a] hover:bg-[#1e3a5f] hover:border-[#4285f4] hover:text-[#7abaff] text-[#999]' : 'border-[#ccc] bg-white hover:bg-[#e8f0fe] hover:border-[#4285f4] hover:text-[#1565c0] text-[#555]'}`}
-            onClick={() => onSendMessage(p, selectedModel)}
-          >
-            {p}
-          </button>
-        ))}
-      </div>
+      {/* Glass-inspired Input Area */}
+      <div className={`p-4 mt-auto border-t space-y-4 ${dm ? 'border-[#222] bg-[#0f0f10]' : 'border-gray-100 bg-white'}`}>
+        {/* Suggested Prompts */}
+        <div className="flex flex-wrap gap-2">
+          {suggestedPrompts.map((p) => (
+            <button
+              key={p}
+              className={`text-[10px] px-3 py-1.5 rounded-full border transition-all duration-200 ${dm ? 'border-[#222] bg-[#161618] text-gray-400 hover:text-white hover:border-[#444]' : 'border-gray-200 bg-white text-gray-500 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50/50'}`}
+              onClick={() => onSendMessage(p, selectedModel)}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
 
-      {/* Input area */}
-      <div className={`border-t px-2.5 pt-2.5 pb-2.5 shrink-0 ${dm ? 'border-[#333] bg-[#252525]' : 'border-[#d4d4d4] bg-[#f5f5f7]'}`}>
-        <div className={`flex items-end gap-2 border rounded-lg px-3 py-2 focus-within:border-[#4285f4] focus-within:shadow-[0_0_0_2px_rgba(66,133,244,0.12)] transition-all duration-150 ${dm ? 'bg-[#2a2a2a] border-[#444]' : 'bg-white border-[#c8c8c8]'}`}>
-          <button
-            onClick={() => {
-               if (onVisualQA) onVisualQA(input.trim() || "Please analyze this circuit.");
-               setInput("");
-            }}
-            title="Analyze screenshot of circuit with local model"
-            className={`shrink-0 flex items-center justify-center p-1.5 rounded-md transition-colors duration-150 ${dm ? 'text-[#888] hover:text-[#fff] hover:bg-[#444]' : 'text-[#888] hover:text-[#333] hover:bg-[#e8e8e8]'}`}
-          >
-            <Camera size={14} />
-          </button>
+        <div className={`relative group p-1 rounded-2xl transition-all duration-300 ${dm ? 'bg-[#1a1a1c] ring-1 ring-white/5' : 'bg-gray-50 ring-1 ring-black/[0.05] hover:ring-blue-100'}`}>
           <textarea
             ref={inputRef}
             rows={1}
-            className={`flex-1 bg-transparent outline-none text-[12px] resize-none ${dm ? 'text-[#ccc] placeholder-[#666]' : 'text-[#1a1a1a] placeholder-[#bbb]'}`}
-            placeholder="Ask local Gemma..."
+            className={`w-full bg-transparent px-4 pt-3 pb-12 outline-none text-[13px] leading-relaxed resize-none ${dm ? 'text-gray-200 placeholder-gray-600' : 'text-gray-800 placeholder-gray-400'}`}
+            placeholder="Describe your design..."
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            style={{ maxHeight: '80px', minHeight: '20px' }}
+            style={{ maxHeight: '120px', minHeight: '44px' }}
           />
+          
+          <div className="absolute bottom-3 left-3 flex gap-1">
+            <button
+               onClick={() => {
+                  if (onVisualQA) onVisualQA(input.trim() || "Please analyze this circuit.");
+                  setInput("");
+               }}
+               className={`p-2 rounded-xl transition-all ${dm ? 'hover:bg-[#222] text-[#666] hover:text-white' : 'hover:bg-white text-gray-400 hover:text-blue-600 shadow-sm'}`}
+            >
+              <Camera size={16} />
+            </button>
+            <div className={`w-[1px] my-1 ${dm ? 'bg-[#222]' : 'bg-gray-200'}`} />
+            <button
+              onClick={() => {
+                if (!onCanvasJsonInteract) return;
+                onCanvasJsonInteract(input.trim() || 'Analyze and update canvas state', selectedModel);
+                setInput('');
+              }}
+              className={`p-2 rounded-xl transition-all ${dm ? 'hover:bg-[#222] text-[#666] hover:text-white' : 'hover:bg-white text-gray-400 hover:text-emerald-500 shadow-sm'}`}
+              title="Canvas JSON Mode"
+            >
+              <History size={16} />
+            </button>
+          </div>
+
           <button
             onClick={handleSend}
             disabled={!input.trim()}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] transition-all duration-150 font-medium ${
+            className={`absolute bottom-3 right-3 p-2.5 rounded-xl transition-all duration-300 ${
               input.trim()
-                ? 'bg-[#1565c0] text-white hover:bg-[#1254a3] shadow-sm'
-                : dm ? 'bg-[#333] text-[#666] cursor-not-allowed' : 'bg-[#e8e8e8] text-[#bbb] cursor-not-allowed'
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500 hover:scale-105 active:scale-95'
+                : dm ? 'bg-[#222] text-[#444] shadow-none' : 'bg-gray-200 text-gray-400 opacity-50'
             }`}
           >
-            <Send size={12} />
-            Send
+            <Send size={16} />
           </button>
         </div>
-        <p className={`text-[10px] mt-1.5 text-center ${dm ? 'text-[#555]' : 'text-[#ccc]'}`}>Shift+Enter for new line</p>
-      </div>
-
-      {/* Builder action buttons */}
-      <div className="px-3 pb-3 pt-1.5 shrink-0 space-y-2">
-        <button
-          onClick={() => {
-            if (!onCanvasJsonInteract) return;
-            onCanvasJsonInteract(input.trim() || 'Analyze canvas JSON and apply required wiring/code changes.', selectedModel);
-            setInput('');
-          }}
-          className="w-full h-[34px] flex items-center justify-center gap-2 bg-gradient-to-b from-[#1f3a2d] to-[#173025] text-white text-[12px] font-semibold rounded-lg hover:from-[#28523e] hover:to-[#1f4634] transition-all duration-150 shadow-md"
-          title="Use dedicated canvas JSON interaction"
-        >
-          <Code2 size={13} className="text-[#8cf5be]" />
-          Canvas JSON Agent
-        </button>
-        <button
-          onClick={onBuild}
-          className="w-full h-[36px] flex items-center justify-center gap-2 bg-gradient-to-b from-[#1a1a2e] to-[#16213e] text-white text-[13px] font-semibold rounded-lg hover:from-[#2a2a3e] hover:to-[#26314e] transition-all duration-150 shadow-md group"
-        >
-          <Code2 size={14} className="text-[#7fdbff]" />
-          Build Project
-        </button>
+        
+        <div className="flex gap-2 pb-2">
+            <button
+              onClick={onBuild}
+              className={`flex-1 h-[38px] flex items-center justify-center gap-2 rounded-xl text-[12px] font-bold transition-all duration-300 ${dm ? 'bg-[#161618] border border-white/5 text-gray-400 hover:text-white hover:bg-[#222]' : 'bg-white border border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-100 shadow-sm hover:shadow-md'}`}
+            >
+              <Code2 size={14} />
+              Build Project
+            </button>
+        </div>
       </div>
     </div>
   );

@@ -218,13 +218,28 @@ export function MainToolbar({ activeTool, onToolChange, zoom, onZoomChange, onUn
 
           <Separator darkMode={dm} />
 
-          {/* History */}
-          <ToolButton title="Undo (Ctrl+Z)" onClick={onUndo} darkMode={dm}>
-            <Undo2 size={14} />
-          </ToolButton>
-          <ToolButton title="Redo (Ctrl+Y)" onClick={onRedo} darkMode={dm}>
-            <Redo2 size={14} />
-          </ToolButton>
+          <Separator darkMode={dm} />
+
+          {/* History & Quick File Actions */}
+          <div className="flex items-center gap-0.5">
+            <ToolButton title="Undo (Ctrl+Z)" onClick={onUndo} darkMode={dm}>
+              <Undo2 size={14} />
+            </ToolButton>
+            <ToolButton title="Redo (Ctrl+Y)" onClick={onRedo} darkMode={dm}>
+              <Redo2 size={14} />
+            </ToolButton>
+          </div>
+
+          <Separator darkMode={dm} />
+
+          <div className="flex items-center gap-0.5">
+            <ToolButton title="Save Project (Ctrl+S)" onClick={() => onSaveProject?.()} darkMode={dm}>
+              <Save size={14} className="text-blue-500/80" />
+            </ToolButton>
+            <ToolButton title="Load Project (Ctrl+O)" onClick={() => onOpenProject?.()} darkMode={dm}>
+              <FolderOpen size={14} className="text-emerald-500/80" />
+            </ToolButton>
+          </div>
         </>
       )}
 

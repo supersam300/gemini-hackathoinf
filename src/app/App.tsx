@@ -27,7 +27,7 @@ import { useEditorStore } from '../store/editorStore';
 import { useArduinoStore } from '../store/arduinoStore';
 import { useSimulationStore } from '../store/simulationStore';
 import {
-  Settings, Moon, Sun, Grid3X3,
+  Settings, Moon, Sun, Grid3X3, Sparkles, Cpu,
   Monitor, Code2,
 } from 'lucide-react';
 
@@ -108,14 +108,14 @@ export default function App() {
   // ── Simulation state ────────────────────────────────────────────────────
   const [activeTool, setActiveTool] = useState<string>('select');
   const [zoom, setZoom] = useState<number>(100);
-  const [statusMessage, setStatusMessage] = useState<string>('Ready — Circuit Designer v2.1');
+  const [statusMessage, setStatusMessage] = useState<string>('Ready — Circuit Designer');
   const [components, setComponents] = useState<PlacedComponent[]>(initialComponents);
   const [wiresState, setWiresState] = useState<Wire[]>([]);
   const [selectedLibComponent, setSelectedLibComponent] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(() => loadSavedMessages());
   const [aiSessionId, setAiSessionId] = useState<string>(() => localStorage.getItem(CHAT_SESSION_KEY) || '');
   const [coordinates, setCoordinates] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [aiPanelCollapsed, setAiPanelCollapsed] = useState(false);
+  const [aiPanelCollapsed, setAiPanelCollapsed] = useState(true);
   const aiResponseIdx = useRef(0);
   const [showGrid, setShowGrid] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
@@ -1080,6 +1080,13 @@ export default function App() {
     }
   }, [darkMode]);
 
+  const handleClearChat = useCallback(() => {
+    setMessages(initialMessages);
+    const newId = `session-${Date.now()}`;
+    setAiSessionId(newId);
+    setStatusMessage('Started a new AI conversation');
+  }, []);
+
 
 
   // ── Copy / Paste ────────────────────────────────────────────────────────
@@ -1538,7 +1545,7 @@ export default function App() {
   }, [handleUndo, handleRedo, handleCopy, handlePaste, activeView, components, wiresState, pushHistory, handleSimulate]);
 
   const dm = darkMode;
-  const titleBg = dm ? 'bg-gradient-to-r from-[#111122] to-[#0d1117]' : 'bg-gradient-to-r from-[#1a1a2e] to-[#16213e]';
+  const titleBg = dm ? 'bg-[#1a1a1c] border-b border-white/5' : 'bg-[#212123] shadow-md';
 
   return (
     <div
@@ -1548,31 +1555,14 @@ export default function App() {
       tabIndex={0}
     >
       {/* Title / App bar */}
-      <div className={`flex items-center h-[32px] ${titleBg} px-4 shrink-0 select-none`}>
-        <div className="flex items-center gap-2.5">
-          <div className="w-5 h-5 rounded bg-gradient-to-br from-[#4facfe] to-[#00f2fe] flex items-center justify-center shadow-sm">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-            </svg>
+      <div className={`flex items-center h-[36px] ${titleBg} px-4 shrink-0 select-none`}>
+          <div className="flex items-center justify-center">
+             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="butt">
+               <path d="M18 6h-7a3 3 0 0 0-3 3v1M6 18h7a3 3 0 0 0 3-3v-1M9 12h6" />
+             </svg>
           </div>
-          <span className="text-[12px] font-semibold text-[#e0e0e0] tracking-wide">SimuIDE</span>
-        </div>
+          <span className="text-[13px] font-bold text-white tracking-tight">SimuIDE</span>
         <div className="ml-auto flex items-center gap-2">
-          {/* Cloud Save/Load buttons */}
-          <button
-            onClick={handleCloudSave}
-            className="text-[10px] text-[#9aa8c0] hover:text-white transition-colors"
-            title="Save to cloud"
-          >
-            ☁ Save
-          </button>
-          <button
-            onClick={() => setLoadDialogOpen(true)}
-            className="text-[10px] text-[#9aa8c0] hover:text-white transition-colors"
-            title="Load a saved workspace"
-          >
-            ☁ Load
-          </button>
           <div className="relative" ref={settingsRef}>
             <button
               onClick={() => setSettingsOpen(s => !s)}
@@ -1741,6 +1731,7 @@ export default function App() {
           onVisualQA={handleVisualQA}
           onBuild={handleVerify}
           onCanvasJsonInteract={handleCanvasJsonInteraction}
+          onClearChat={handleClearChat}
           collapsed={aiPanelCollapsed}
           onToggleCollapse={() => setAiPanelCollapsed(c => !c)}
           darkMode={darkMode}
