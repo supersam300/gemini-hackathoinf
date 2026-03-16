@@ -118,6 +118,23 @@ def normalize_pin(pin_str):
     return pin_str
 
 
+def _sanitize_ref_token(value, max_len=48):
+    token = str(value or "").strip().strip('"').strip("'")
+    if not token:
+        return ""
+    if len(token) > max_len:
+        return ""
+    if "\n" in token or "\r" in token or "\t" in token:
+        return ""
+    if token.startswith("{") or token.startswith("[") or token.endswith("}") or token.endswith("]"):
+        return ""
+    if re.search(r"""["'][A-Za-z_][\w-]*["']\s*:""", token):
+        return ""
+    if "{" in token and ":" in token and "," in token:
+        return ""
+    return token
+
+
 def normalize_action(action):
     """Normalize action types and pin formats to match frontend schema."""
     # Some models return `action`/`operation` instead of `type`.
@@ -161,6 +178,16 @@ def normalize_action(action):
         )
         lowered = str(raw_type).strip().lower()
         result["componentType"] = COMPONENT_TYPE_ALIASES.get(lowered, lowered or "led")
+        clean_label = _sanitize_ref_token(result.get("label") or action.get("label"))
+        clean_id = _sanitize_ref_token(result.get("id") or action.get("id"))
+        if clean_label:
+            result["label"] = clean_label
+        elif "label" in result:
+            result.pop("label", None)
+        if clean_id:
+            result["id"] = clean_id
+        elif "id" in result:
+            result.pop("id", None)
         if not result.get("label"):
             default_label_map = {
                 "arduino-uno": "U1",
@@ -647,6 +674,140 @@ def _find_power_source_ref(ref_to_type, valid_refs):
     return ""
 
 
+def _collect_component_instances(canvas_state, actions):
+    """Collect stable component refs (prefer label, then id) with type."""
+    instances = []
+    seen = set()
+
+    components = canvas_state.get("components", []) if isinstance(canvas_state, dict) else []
+    for comp in components:
+        if not isinstance(comp, dict):
+            continue
+        ctype = str(
+            comp.get("type")
+            or comp.get("componentType")
+            or comp.get("name")
+            or ""
+        ).strip().lower()
+        if not ctype:
+            continue
+        ref = str(comp.get("label") or comp.get("id") or "").strip().lower()
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        instances.append({"ref": ref, "type": ctype})
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        if str(action.get("type", "")).upper() != "PLACE_COMPONENT":
+            continue
+        ctype = str(
+            action.get("componentType")
+            or action.get("component")
+            or action.get("name")
+            or ""
+        ).strip().lower()
+        if not ctype:
+            continue
+        ref = str(action.get("label") or action.get("id") or "").strip().lower()
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        instances.append({"ref": ref, "type": ctype})
+
+    return instances
+
+
+def _component_has_pin_connection(wire_tuples, comp_ref, pin_aliases):
+    aliases = {str(a).strip().lower() for a in pin_aliases if str(a).strip()}
+    for f_ref, f_pin, t_ref, t_pin in wire_tuples:
+        if f_ref == comp_ref and str(f_pin).strip().lower() in aliases:
+            return True
+        if t_ref == comp_ref and str(t_pin).strip().lower() in aliases:
+            return True
+    return False
+
+
+def _components_are_connected(wire_tuples, ref_a, ref_b):
+    for f_ref, _, t_ref, _ in wire_tuples:
+        if (f_ref == ref_a and t_ref == ref_b) or (f_ref == ref_b and t_ref == ref_a):
+            return True
+    return False
+
+
+def _component_connected_to_arduino(wire_tuples, comp_ref, arduino_ref):
+    return _components_are_connected(wire_tuples, comp_ref, arduino_ref)
+
+
+def _auto_complete_wiring(actions, canvas_state):
+    """
+    Complete common partial plans so each LED path is electrically closed.
+    Pattern enforced: Arduino Pin -> Resistor -> LED(A), LED(C) -> Arduino GND.
+    """
+    if not actions:
+        return actions
+
+    wire_tuples = _collect_wire_tuples(canvas_state, actions)
+    instances = _collect_component_instances(canvas_state, actions)
+    if not instances:
+        return actions
+
+    arduino_refs = [c["ref"] for c in instances if "arduino" in c["type"]]
+    led_refs = [c["ref"] for c in instances if "led" in c["type"]]
+    resistor_refs = [c["ref"] for c in instances if "resistor" in c["type"]]
+    if not led_refs:
+        return actions
+
+    arduino_ref = arduino_refs[0] if arduino_refs else ""
+
+    def append_wire(from_ref, from_pin, to_ref, to_pin):
+        if not from_ref or not to_ref:
+            return
+        if _wire_exists(wire_tuples, from_ref, from_pin, to_ref, to_pin):
+            return
+        actions.append({
+            "type": "ADD_WIRE",
+            "from": f"{from_ref}:{from_pin}",
+            "to": f"{to_ref}:{to_pin}",
+        })
+        wire_tuples.append((from_ref, str(from_pin).lower(), to_ref, str(to_pin).lower()))
+
+    for idx, led_ref in enumerate(led_refs):
+        # Ensure LED cathode is grounded.
+        has_led_ground = _component_has_pin_connection(
+            wire_tuples,
+            led_ref,
+            {"c", "cathode", "k", "gnd"},
+        )
+        if not has_led_ground and arduino_ref:
+            append_wire(led_ref, "C", arduino_ref, "GND")
+
+        # Ensure LED anode has a drive path.
+        has_led_anode = _component_has_pin_connection(
+            wire_tuples,
+            led_ref,
+            {"a", "anode", "vcc", "pos", "+"},
+        )
+        if has_led_anode:
+            continue
+
+        if idx < len(resistor_refs):
+            resistor_ref = resistor_refs[idx]
+            # Resistor -> LED anode
+            append_wire(resistor_ref, "2", led_ref, "A")
+            # Arduino -> resistor input
+            if arduino_ref and not _component_connected_to_arduino(wire_tuples, resistor_ref, arduino_ref):
+                pin = PIN_SEQUENCE[idx % len(PIN_SEQUENCE)]
+                append_wire(arduino_ref, pin, resistor_ref, "1")
+        elif arduino_ref:
+            # No resistor available; at least close the signal path.
+            pin = PIN_SEQUENCE[idx % len(PIN_SEQUENCE)]
+            append_wire(arduino_ref, pin, led_ref, "A")
+
+    return actions
+
+
 def apply_action_guardrails(actions, prompt, canvas_state):
     if not isinstance(actions, list):
         return []
@@ -738,6 +899,8 @@ def apply_action_guardrails(actions, prompt, canvas_state):
                     })
                     wire_tuples.append((power_source_ref, "5v", comp_ref, "vcc"))
 
+    final_actions = _auto_complete_wiring(final_actions, canvas_state)
+    final_actions = _ensure_build_flow_actions(final_actions, prompt, canvas_state)
     return final_actions
 
 
@@ -747,6 +910,81 @@ def _is_build_intent(prompt):
         token in text
         for token in ("build", "compile", "simulate", "run", "code", "blink", "project", "runnable")
     )
+
+
+def _wants_start_simulation(prompt):
+    text = str(prompt or "").lower()
+    return any(token in text for token in ("simulate", "simulation", "run", "start"))
+
+
+def _count_led_targets(canvas_state, actions):
+    count = 0
+    if isinstance(canvas_state, dict):
+        for comp in canvas_state.get("components", []):
+            if not isinstance(comp, dict):
+                continue
+            ctype = str(comp.get("type") or comp.get("componentType") or "").strip().lower()
+            if "led" in ctype:
+                count += 1
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        if str(action.get("type", "")).upper() != "PLACE_COMPONENT":
+            continue
+        ctype = str(action.get("componentType") or action.get("component") or "").strip().lower()
+        if "led" in ctype:
+            count += 1
+    return max(1, min(count, 8))
+
+
+def _build_default_blink_code(led_count):
+    n = max(1, min(int(led_count or 1), 8))
+    pin_decls = "\n".join(
+        [f"const int LED{i}_PIN = {PIN_SEQUENCE[(i - 1) % len(PIN_SEQUENCE)]};" for i in range(1, n + 1)]
+    )
+    setup_lines = "\n".join([f"  pinMode(LED{i}_PIN, OUTPUT);" for i in range(1, n + 1)])
+    phase_lines = []
+    for i in range(1, n + 1):
+        phase_lines.append(f"  digitalWrite(LED{i}_PIN, HIGH);")
+        for j in range(1, n + 1):
+            if j != i:
+                phase_lines.append(f"  digitalWrite(LED{j}_PIN, LOW);")
+        phase_lines.append("  delay(500);")
+        phase_lines.append("")
+    phases = "\n".join(phase_lines).rstrip()
+    return f"""{pin_decls}
+
+void setup() {{
+{setup_lines}
+}}
+
+void loop() {{
+{phases}
+}}
+"""
+
+
+def _ensure_build_flow_actions(actions, prompt, canvas_state):
+    if not _is_build_intent(prompt):
+        return actions
+    if _wants_wiring_only(prompt):
+        return actions
+
+    has_update = any(str(a.get("type", "")).upper() == "UPDATE_CODE" for a in actions if isinstance(a, dict))
+    has_verify = any(str(a.get("type", "")).upper() == "VERIFY_BUILD" for a in actions if isinstance(a, dict))
+    has_start = any(str(a.get("type", "")).upper() == "START_SIMULATION" for a in actions if isinstance(a, dict))
+
+    if not has_update:
+        actions.append({
+            "type": "UPDATE_CODE",
+            "fileName": "Blink.ino",
+            "code": _build_default_blink_code(_count_led_targets(canvas_state, actions)),
+        })
+    if not has_verify:
+        actions.append({"type": "VERIFY_BUILD"})
+    if _wants_start_simulation(prompt) and not has_start:
+        actions.append({"type": "START_SIMULATION"})
+    return actions
 
 
 def _component_ref(comp):

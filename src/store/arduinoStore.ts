@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { ArduinoPort, ArduinoBoard, BuildStatus, OutputLine } from "../types/arduino";
-import { fetchPorts, compileSketch, uploadSketch, KNOWN_BOARDS } from "../api/arduino";
+import { ensureArduinoServerReachable, fetchPorts, compileSketch, uploadSketch, KNOWN_BOARDS } from "../api/arduino";
 
 let lineIdCounter = 0;
 function makeLines(text: string, type: OutputLine["type"]): OutputLine[] {
@@ -75,6 +75,7 @@ export const useArduinoStore = create<ArduinoStore>((set, get) => ({
             set((s) => ({ outputLog: [...s.outputLog, ...makeLines(text, type)] }));
 
         try {
+            await ensureArduinoServerReachable();
             const res = await fetchPorts();
             if (res.success) {
                 set({ ports: res.ports, portsLoading: false });
@@ -114,6 +115,7 @@ export const useArduinoStore = create<ArduinoStore>((set, get) => ({
         addLines(`⚙ Compiling for ${selectedBoard.name} (${selectedBoard.fqbn})…`, "info");
 
         try {
+            await ensureArduinoServerReachable();
             const res = await compileSketch(files, selectedBoard.fqbn);
             if (res.output) addLines(res.output, "stdout");
             if (res.error) addLines(res.error, "stderr");
@@ -154,6 +156,7 @@ export const useArduinoStore = create<ArduinoStore>((set, get) => ({
         );
 
         try {
+            await ensureArduinoServerReachable();
             const res = await uploadSketch(files, selectedBoard.fqbn, selectedPort);
             if (res.output) addLines(res.output, "stdout");
             if (res.error) addLines(res.error, "stderr");

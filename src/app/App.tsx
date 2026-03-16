@@ -238,14 +238,17 @@ export default function App() {
   }, [ideFileTree, codeTabs]);
 
   // ── Verify using real Arduino backend when available ─────────
-  const handleVerify = useCallback(() => {
+  const handleVerify = useCallback(async () => {
     if (arduinoStore.compileStatus === 'running' || arduinoStore.uploadStatus === 'running') return;
     arduinoStore.clearLog();
     setBottomVisible(true);
     setBottomTab('output');
 
     const files = getAllFiles();
-    arduinoStore.compile(files);
+    const ok = await arduinoStore.compile(files);
+    if (!ok) {
+      setStatusMessage('Build failed - check output for details');
+    }
   }, [getAllFiles, arduinoStore]);
 
   // ── Upload using real Arduino backend when available ────────────────────
@@ -524,6 +527,7 @@ export default function App() {
       let shouldStartSimulation = false;
       let shouldStopSimulation = false;
       let shouldVerifyBuild = false;
+      const createdRefMap = new Map<string, string>();
 
       const normalizeActionType = (value: unknown) => {
         const t = String(value || '').trim().toUpperCase();
@@ -543,10 +547,111 @@ export default function App() {
         return aliases[raw] || raw;
       };
 
+      const parseActionMaybeString = (value: unknown): any | null => {
+        if (value && typeof value === 'object') return value;
+        const raw = String(value || '').trim();
+        if (!raw) return null;
+        try {
+          return JSON.parse(raw);
+        } catch {
+          // Best-effort conversion for python-style dict strings.
+          try {
+            const repaired = raw
+              .replace(/([{,]\s*)'([^']+?)'\s*:/g, '$1"$2":')
+              .replace(/:\s*'([^']*?)'(\s*[},])/g, ': "$1"$2')
+              .replace(/\bNone\b/g, 'null')
+              .replace(/\bTrue\b/g, 'true')
+              .replace(/\bFalse\b/g, 'false');
+            return JSON.parse(repaired);
+          } catch {
+            return null;
+          }
+        }
+      };
+
+      const inferComponentTypeFromBlob = (blob: string): string => {
+        const text = blob.toLowerCase();
+        if (text.includes('arduino') || text.includes('uno')) return 'arduino-uno';
+        if (text.includes('resistor')) return 'resistor';
+        if (text.includes('led')) return 'led';
+        if (text.includes('"type":"gnd"') || text.includes("'type':'gnd'") || text.includes('ground')) return 'gnd';
+        if (text.includes('"type":"vcc"') || text.includes("'type':'vcc'")) return 'vcc';
+        if (text.includes('battery')) return 'battery';
+        return '';
+      };
+
+      const normalizedActions = data.actions
+        .map((rawAction: any) => parseActionMaybeString(rawAction))
+        .filter((a: any) => a && typeof a === 'object');
+
       const norm = (v: unknown) => String(v || '').trim().toLowerCase();
+      const alnum = (v: unknown) => norm(v).replace(/[^a-z0-9]/g, '');
+      const sanitizeToken = (v: unknown) => String(v || '')
+        .replace(/[\{\}\[\]]/g, '')
+        .replace(/^["']|["']$/g, '')
+        .trim();
+      const looksLikeJsonBlob = (value: string) => {
+        const s = String(value || '').trim();
+        if (!s) return false;
+        if (/^[\[{]/.test(s) || /[\]}]$/.test(s)) return true;
+        if (/["'][A-Za-z_][\w-]*["']\s*:/.test(s)) return true;
+        if (s.includes('TYPE') && s.includes('ROTATION') && s.includes('X') && s.includes('Y')) return true;
+        if (s.includes('{') && s.includes(':') && s.includes(',')) return true;
+        return false;
+      };
+      const isSafeRefToken = (value: string, maxLen = 40) => {
+        const s = String(value || '').trim();
+        if (!s) return false;
+        if (s.length > maxLen) return false;
+        if (looksLikeJsonBlob(s)) return false;
+        if (/[\r\n\t]/.test(s)) return false;
+        return true;
+      };
+      const nextLabelForType = (compType: string) => {
+        const prefixMap: Record<string, string> = {
+          'arduino-uno': 'U',
+          resistor: 'R',
+          led: 'D',
+          capacitor: 'C',
+          battery: 'B',
+          gnd: 'G',
+          vcc: 'V',
+        };
+        const prefix = prefixMap[compType] || compType.charAt(0).toUpperCase() || 'C';
+        let maxN = 0;
+        for (const c of nextComponents) {
+          const m = String(c.label || '').trim().toUpperCase().match(new RegExp(`^${prefix}(\\d+)$`));
+          if (m) maxN = Math.max(maxN, Number.parseInt(m[1], 10));
+        }
+        return `${prefix}${maxN + 1}`;
+      };
+      const toNumber = (v: unknown): number | null => {
+        if (typeof v === 'number' && Number.isFinite(v)) return v;
+        const parsed = Number.parseFloat(String(v ?? '').replace(/[^\d.-]/g, ''));
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+      const findAutoPosition = (compType: string) => {
+        const sameTypeCount = nextComponents.filter(c => c.type === compType).length;
+        const col = sameTypeCount % 4;
+        const row = Math.floor(sameTypeCount / 4);
+        return { x: 180 + col * 120, y: 120 + row * 90 };
+      };
+      const parseTypeHint = (token: string): { type: string; ordinal: number | null } | null => {
+        const t = token.toLowerCase().replace(/[_-]+/g, ' ').trim();
+        const m = t.match(/^(arduino(?:\s*uno)?|uno|led|resistor|battery|gnd|vcc)\s*#?\s*(\d+)?$/);
+        if (!m) return null;
+        const rawType = m[1];
+        const mappedType = normalizeComponentType(rawType);
+        return {
+          type: mappedType,
+          ordinal: m[2] ? Math.max(1, Number.parseInt(m[2], 10)) : null,
+        };
+      };
       const resolveComponentId = (ref: unknown): string | null => {
-        const token = String(ref || '').trim();
+        const token = sanitizeToken(ref);
         if (!token) return null;
+        const mapped = createdRefMap.get(token.toLowerCase());
+        if (mapped) return mapped;
         // exact ID
         const exact = nextComponents.find(c => c.id === token);
         if (exact) return exact.id;
@@ -557,7 +662,25 @@ export default function App() {
           c.label.toLowerCase() === n ||
           c.type.toLowerCase() === n
         );
-        return ci?.id || null;
+        if (ci?.id) return ci.id;
+        // compare with punctuation removed (e.g. "R-1" vs "R1")
+        const nAlnum = alnum(token);
+        const fuzzy = nextComponents.find(c =>
+          alnum(c.id) === nAlnum ||
+          alnum(c.label) === nAlnum ||
+          alnum(c.type) === nAlnum
+        );
+        if (fuzzy?.id) return fuzzy.id;
+        // Handle tokens like "resistor 2", "led1", "uno"
+        const hinted = parseTypeHint(token.replace(/\s+(pin|leg|terminal)\s*\w*$/i, '').replace(/[:.].*$/, ''));
+        if (hinted) {
+          const ofType = nextComponents.filter(c => normalizeComponentType(c.type) === hinted.type);
+          if (ofType.length > 0) {
+            if (hinted.ordinal && ofType[hinted.ordinal - 1]) return ofType[hinted.ordinal - 1].id;
+            return ofType[0].id;
+          }
+        }
+        return null;
       };
       const normalizePin = (pin: string) => {
         const raw = String(pin || '').trim();
@@ -598,6 +721,12 @@ export default function App() {
           const idx = s.lastIndexOf('.');
           compRef = s.slice(0, idx).trim();
           pinRef = s.slice(idx + 1).trim();
+        } else {
+          const m = s.match(/^(.+?)\s+(?:pin|leg|terminal)?\s*([a-z0-9.+-]+)$/i);
+          if (m) {
+            compRef = m[1].trim();
+            pinRef = m[2].trim();
+          }
         }
         const compId = resolveComponentId(compRef);
         if (!compId) return null;
@@ -607,20 +736,51 @@ export default function App() {
       };
 
       const parseEndpointFromAction = (action: any, side: 'from' | 'to') => {
-        const endpointRaw = action?.[side];
+        const sideU = side.toUpperCase();
+        const endpointRaw =
+          action?.[side] ??
+          action?.[sideU] ??
+          action?.[side === 'from' ? 'source' : 'target'] ??
+          action?.[side === 'from' ? 'SOURCE' : 'TARGET'] ??
+          action?.[side === 'from' ? 'start' : 'end'] ??
+          action?.[side === 'from' ? 'START' : 'END'];
         if (typeof endpointRaw === 'object' && endpointRaw !== null) {
-          const compRef = endpointRaw.componentId || endpointRaw.component || endpointRaw.id || endpointRaw.label;
-          const pin = endpointRaw.pin || endpointRaw.pinName || endpointRaw.handle;
+          const compRef =
+            endpointRaw.componentId || endpointRaw.component || endpointRaw.id || endpointRaw.label ||
+            endpointRaw.componentRef || endpointRaw.ref || endpointRaw.node ||
+            endpointRaw.ID || endpointRaw.LABEL;
+          const pin =
+            endpointRaw.pin || endpointRaw.pinName || endpointRaw.handle || endpointRaw.terminal ||
+            endpointRaw.PIN || endpointRaw.PINNAME;
           if (!compRef) return null;
           return parseEndpoint(`${compRef}:${pin || ''}`, side);
         }
         if (!endpointRaw) {
-          const compRef = action?.[`${side}ComponentId`] || action?.[`${side}Id`] || action?.[`${side}Label`];
-          const pin = action?.[`${side}Pin`] || action?.[`${side}PinName`] || action?.[`${side}Handle`];
+          const compRef =
+            action?.[`${side}ComponentId`] || action?.[`${side}Id`] || action?.[`${side}Label`] ||
+            action?.[`${side}Component`] || action?.[`${side}Ref`] ||
+            action?.[`${sideU}COMPONENTID`] || action?.[`${sideU}ID`] || action?.[`${sideU}COMPONENT`] ||
+            action?.[side === 'from' ? 'sourceComponent' : 'targetComponent'] ||
+            action?.[side === 'from' ? 'sourceId' : 'targetId'] ||
+            action?.[side === 'from' ? 'startComponent' : 'endComponent'];
+          const pin =
+            action?.[`${side}Pin`] || action?.[`${side}PinName`] || action?.[`${side}Handle`] ||
+            action?.[`${sideU}PIN`] || action?.[`${sideU}PINNAME`] ||
+            action?.[side === 'from' ? 'sourcePin' : 'targetPin'] ||
+            action?.[side === 'from' ? 'startPin' : 'endPin'];
           if (!compRef) return null;
           return parseEndpoint(`${compRef}:${pin || ''}`, side);
         }
         return parseEndpoint(endpointRaw, side);
+      };
+      const inferActionType = (action: any) => {
+        const explicit = normalizeActionType(
+          action?.type || action?.action || action?.ACTION || action?.operation || action?.OPERATION
+        );
+        if (explicit) return explicit;
+        if ((action?.from || action?.FROM || action?.to || action?.TO)) return 'ADD_WIRE';
+        if ((action?.componentType || action?.COMPONENTTYPE || action?.name || action?.NAME)) return 'PLACE_COMPONENT';
+        return '';
       };
 
       const normalizeIncomingCode = (rawCode: unknown): string => {
@@ -715,32 +875,53 @@ export default function App() {
         return matchedNodeId;
       };
 
-      data.actions.forEach((action: any) => {
-        const actionType = normalizeActionType(action?.type);
+      normalizedActions.forEach((action: any) => {
+        const actionType = inferActionType(action);
         switch (actionType) {
           case 'PLACE_COMPONENT': {
             // Use action.id or action.label as the deterministc ID so wires can connect to it.
             // Fall back to a random ID if neither is provided.
-            const componentType = normalizeComponentType(
-              action.componentType || action.component || action.name || action.typeName
+            let componentType = normalizeComponentType(
+              action.componentType || action.COMPONENTTYPE || action.component || action.name || action.NAME || action.typeName || action.TYPE
             );
-            const compLabel = action.label || action.componentId || action.id || componentType.toUpperCase();
-            const compId = action.id || action.componentId || action.label || `${componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+            if (!componentType || /[\{\}\[\]]/.test(componentType) || componentType.length > 40) {
+              componentType = inferComponentTypeFromBlob(JSON.stringify(action));
+            }
+            if (!componentType) break;
+
+            const rawLabel = action.label || action.LABEL || action.componentId || action.COMPONENTID || action.id || action.ID;
+            const rawId = action.id || action.ID || action.componentId || action.COMPONENTID || rawLabel;
+            const sanitizedLabel = sanitizeToken(rawLabel);
+            const fallbackLabel = nextLabelForType(componentType);
+            const compLabel = isSafeRefToken(sanitizedLabel, 24) ? sanitizedLabel : fallbackLabel;
+            const sanitizedId = sanitizeToken(rawId).replace(/\s+/g, '-');
+            const compId = isSafeRefToken(sanitizedId, 48)
+              ? sanitizedId
+              : `${componentType}-${fallbackLabel.toLowerCase()}-${Date.now().toString(36)}`;
+            const px = toNumber(action.x ?? action.X);
+            const py = toNumber(action.y ?? action.Y);
+            const auto = findAutoPosition(componentType);
+            const x = px ?? auto.x;
+            const y = py ?? auto.y;
             const newComp: PlacedComponent = {
               id: compId,
               type: componentType,
-              x: action.x || 100,
-              y: action.y || 100,
+              x,
+              y,
               label: compLabel,
               selected: false,
               rotation: 0,
-              attrs: action.properties || {},
+              attrs: action.properties || action.PROPERTIES || {},
             };
             if (!nextComponents.some(c => c.id === newComp.id)) {
               nextComponents.push(newComp);
+              createdRefMap.set(compId.toLowerCase(), newComp.id);
+              createdRefMap.set(compLabel.toLowerCase(), newComp.id);
+              if (rawLabel) createdRefMap.set(String(rawLabel).trim().toLowerCase(), newComp.id);
+              if (rawId) createdRefMap.set(String(rawId).trim().toLowerCase(), newComp.id);
               componentsChanged = true;
             }
-            setStatusMessage(`AI placed ${action.componentType}`);
+            setStatusMessage(`AI placed ${componentType}`);
             break;
           }
           case 'ADD_WIRE': {
