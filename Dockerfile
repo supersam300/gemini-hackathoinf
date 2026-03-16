@@ -18,7 +18,7 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Production stage
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
@@ -26,7 +26,16 @@ WORKDIR /app
 # Download the arduino-cli binary directly from a versioned tarball rather than
 # piping an external install script, so the output path is deterministic and
 # verifiable. --log-level warn prevents interactive prompts that would hang CI.
-RUN apk add --no-cache curl python3 py3-pip bash \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      curl \
+      python3 \
+      python3-pip \
+      python3-venv \
+      bash \
+      ca-certificates \
+      xz-utils \
+    && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL "https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Linux_64bit.tar.gz" \
        | tar -xz -C /usr/local/bin arduino-cli \
     && arduino-cli version \
