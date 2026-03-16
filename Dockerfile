@@ -22,15 +22,7 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Build-time model selection for baked-in Ollama model.
-# Override with: --build-arg OLLAMA_MODEL=gemma3:4b
-ARG OLLAMA_MODEL=gemma3:latest
-ENV OLLAMA_MODEL=${OLLAMA_MODEL}
-ENV OLLAMA_BASE_URL=http://127.0.0.1:11434
-ENV OLLAMA_HOST=127.0.0.1:11434
-ENV OLLAMA_MODELS=/opt/ollama/models
-
-# Install dependencies: arduino-cli, Python 3, AVR core, and Ollama
+# Install dependencies: arduino-cli and Python 3
 # Download the arduino-cli binary directly from a versioned tarball rather than
 # piping an external install script, so the output path is deterministic and
 # verifiable. --log-level warn prevents interactive prompts that would hang CI.
@@ -39,21 +31,7 @@ RUN apk add --no-cache curl python3 py3-pip bash \
        | tar -xz -C /usr/local/bin arduino-cli \
     && arduino-cli version \
     && arduino-cli core update-index --log-level warn \
-    && arduino-cli core install arduino:avr --log-level warn \
-    && mkdir -p "${OLLAMA_MODELS}" \
-    && curl -fsSL "https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tgz" \
-       | tar -xz -C /usr/local/bin ollama
-
-# Pre-pull model into image so deployment is self-contained.
-# This increases image size significantly but avoids runtime pulls in Cloud Run.
-RUN sh -c 'set -e; ollama serve >/tmp/ollama-build.log 2>&1 & \
-    OLLAMA_PID=$!; \
-    for i in $(seq 1 60); do \
-      if ollama list >/dev/null 2>&1; then break; fi; \
-      sleep 1; \
-    done; \
-    ollama pull "${OLLAMA_MODEL}"; \
-    kill "${OLLAMA_PID}" >/dev/null 2>&1 || true'
+    && arduino-cli core install arduino:avr --log-level warn
 
 # Create python virtual environment and install requirements
 COPY requirements.txt .
@@ -84,7 +62,5 @@ ENV PORT=3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
 
-# Start Ollama + the integrated Express server
-COPY docker/start-with-ollama.sh /usr/local/bin/start-with-ollama.sh
-RUN chmod +x /usr/local/bin/start-with-ollama.sh
-CMD ["/usr/local/bin/start-with-ollama.sh"]
+# Start integrated Express server
+CMD ["node", "server/index.js"]
