@@ -58,7 +58,7 @@ VALID_ACTION_TYPES = {
 }
 
 PIN_SEQUENCE = ["13", "12", "11", "10", "9", "8", "7", "6", "5", "4", "3", "2"]
-DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 GENAI_CLIENT = None
 
 
@@ -238,14 +238,22 @@ def attempt_repair_json_payload(text):
 
 
 def _resolve_agent_model(requested_model):
-    if requested_model:
-        return str(requested_model)
-    return (
+    configured_gemini_model = (
         os.environ.get("GEMINI_AGENT_MODEL")
         or os.environ.get("GEMINI_MODEL")
-        or os.environ.get("OLLAMA_MODEL")
         or DEFAULT_GEMINI_MODEL
     )
+    chosen = str(requested_model).strip() if requested_model else configured_gemini_model
+    # Normalize non-Gemini aliases passed from UI/config to configured Gemini model.
+    alias_map = {
+        "gemma3:latest": configured_gemini_model,
+        "gemma3:4b": configured_gemini_model,
+        "gemma3:12b": configured_gemini_model,
+        "models/gemma3:latest": configured_gemini_model,
+        "huggingface/google/gemma-3-4b-it": configured_gemini_model,
+        "google/gemma-3-4b-it": configured_gemini_model,
+    }
+    return alias_map.get(chosen.lower(), chosen)
 
 
 def _get_genai_client():
@@ -530,6 +538,115 @@ def _collect_planned_component_refs(actions):
     return refs
 
 
+def _collect_component_type_map(canvas_state, actions):
+    ref_to_type = {}
+    components = canvas_state.get("components", []) if isinstance(canvas_state, dict) else []
+    for comp in components:
+        if not isinstance(comp, dict):
+            continue
+        comp_type = str(
+            comp.get("type")
+            or comp.get("componentType")
+            or comp.get("name")
+            or ""
+        ).strip().lower()
+        for key in ("id", "label", "type", "componentType", "name"):
+            ref = str(comp.get(key, "")).strip().lower()
+            if ref and comp_type:
+                ref_to_type[ref] = comp_type
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        if str(action.get("type", "")).upper() != "PLACE_COMPONENT":
+            continue
+        comp_type = str(
+            action.get("componentType")
+            or action.get("component")
+            or action.get("name")
+            or ""
+        ).strip().lower()
+        for key in ("id", "label", "componentType", "component", "name"):
+            ref = str(action.get(key, "")).strip().lower()
+            if ref and comp_type:
+                ref_to_type[ref] = comp_type
+    return ref_to_type
+
+
+def _extract_ref_and_pin(endpoint_value):
+    raw = str(endpoint_value or "").strip()
+    if not raw:
+        return "", ""
+    if ":" in raw:
+        ref, pin = raw.split(":", 1)
+        return ref.strip().lower(), pin.strip().lower()
+    if "." in raw:
+        parts = raw.split(".")
+        if len(parts) >= 3 and parts[1] == "pins":
+            return parts[0].strip().lower(), parts[2].strip().lower()
+        if len(parts) >= 2:
+            return parts[0].strip().lower(), parts[-1].strip().lower()
+    return raw.lower(), ""
+
+
+def _collect_wire_tuples(canvas_state, actions):
+    tuples = []
+    # Existing wires from canvas state.
+    wires = canvas_state.get("wires", []) if isinstance(canvas_state, dict) else []
+    for wire in wires:
+        if not isinstance(wire, dict):
+            continue
+        if "from" in wire or "to" in wire:
+            f_ref, f_pin = _extract_ref_and_pin(wire.get("from"))
+            t_ref, t_pin = _extract_ref_and_pin(wire.get("to"))
+        else:
+            f_ref = str(wire.get("fromComponentId", "")).strip().lower()
+            f_pin = str(wire.get("fromPinName", "")).strip().lower()
+            t_ref = str(wire.get("toComponentId", "")).strip().lower()
+            t_pin = str(wire.get("toPinName", "")).strip().lower()
+        if f_ref and t_ref:
+            tuples.append((f_ref, f_pin, t_ref, t_pin))
+
+    # Planned wire actions.
+    for action in actions:
+        if str(action.get("type", "")).upper() != "ADD_WIRE":
+            continue
+        f_ref, f_pin = _extract_ref_and_pin(action.get("from"))
+        t_ref, t_pin = _extract_ref_and_pin(action.get("to"))
+        if f_ref and t_ref:
+            tuples.append((f_ref, f_pin, t_ref, t_pin))
+
+    return tuples
+
+
+def _is_power_like_pin(pin_name):
+    pin = str(pin_name or "").strip().lower()
+    return pin in {"5v", "3.3v", "3v3", "vcc", "vin", "pos", "power"}
+
+
+def _component_needs_power(comp_type):
+    ctype = str(comp_type or "").lower()
+    if not ctype:
+        return False
+    skip_tokens = ("arduino", "resistor", "gnd", "ground", "vcc", "battery", "power")
+    return not any(token in ctype for token in skip_tokens)
+
+
+def _wire_exists(wire_tuples, from_ref, from_pin, to_ref, to_pin):
+    a = (from_ref, str(from_pin).lower(), to_ref, str(to_pin).lower())
+    b = (to_ref, str(to_pin).lower(), from_ref, str(from_pin).lower())
+    return a in wire_tuples or b in wire_tuples
+
+
+def _find_power_source_ref(ref_to_type, valid_refs):
+    # Prefer arduino board as power source.
+    for ref in valid_refs:
+        ctype = ref_to_type.get(ref, "")
+        if "arduino" in ctype:
+            return ref
+    return ""
+
+
 def apply_action_guardrails(actions, prompt, canvas_state):
     if not isinstance(actions, list):
         return []
@@ -567,6 +684,59 @@ def apply_action_guardrails(actions, prompt, canvas_state):
         if from_ref not in valid_refs or to_ref not in valid_refs:
             continue
         final_actions.append(action)
+
+    # Enforce power wiring for components that require supply when we are wiring.
+    if final_actions:
+        ref_to_type = _collect_component_type_map(canvas_state, filtered)
+        wire_tuples = _collect_wire_tuples(canvas_state, final_actions)
+        valid_refs = existing_refs | _collect_planned_component_refs(filtered)
+        power_source_ref = _find_power_source_ref(ref_to_type, valid_refs)
+
+        if power_source_ref:
+            # Components touched by this plan should have a power connection.
+            candidate_refs = set()
+            for action in final_actions:
+                atype = str(action.get("type", "")).upper()
+                if atype == "PLACE_COMPONENT":
+                    for key in ("id", "label"):
+                        ref = str(action.get(key, "")).strip().lower()
+                        if ref:
+                            candidate_refs.add(ref)
+                elif atype == "ADD_WIRE":
+                    f_ref = _extract_component_ref(action.get("from"))
+                    t_ref = _extract_component_ref(action.get("to"))
+                    if f_ref:
+                        candidate_refs.add(f_ref)
+                    if t_ref:
+                        candidate_refs.add(t_ref)
+
+            for comp_ref in sorted(candidate_refs):
+                if comp_ref == power_source_ref:
+                    continue
+                if comp_ref not in valid_refs:
+                    continue
+                comp_type = ref_to_type.get(comp_ref, comp_ref)
+                if not _component_needs_power(comp_type):
+                    continue
+
+                has_power = False
+                for f_ref, f_pin, t_ref, t_pin in wire_tuples:
+                    if comp_ref == f_ref and _is_power_like_pin(t_pin):
+                        has_power = True
+                        break
+                    if comp_ref == t_ref and _is_power_like_pin(f_pin):
+                        has_power = True
+                        break
+                if has_power:
+                    continue
+
+                if not _wire_exists(wire_tuples, power_source_ref, "5V", comp_ref, "VCC"):
+                    final_actions.append({
+                        "type": "ADD_WIRE",
+                        "from": f"{power_source_ref}:5V",
+                        "to": f"{comp_ref}:VCC",
+                    })
+                    wire_tuples.append((power_source_ref, "5v", comp_ref, "vcc"))
 
     return final_actions
 
@@ -952,7 +1122,25 @@ def run_genai_agent(prompt, canvas_state, image_base64, requested_model=None, hi
             },
         }
 
-    convo = run_conversation_agent(model, prompt, history, canvas_state, image_base64)
+    try:
+        convo = run_conversation_agent(model, prompt, history, canvas_state, image_base64)
+    except Exception as exc:
+        # Keep chat usable even if the selected model is temporarily unavailable.
+        return {
+            "success": True,
+            "text": f"I could not reach model `{model}` right now ({exc}). Try again or choose a different model.",
+            "actions": [],
+            "meta": {
+                "model": model,
+                "mode": "default",
+                "policyVariant": policy_variant,
+                "wantsActions": wants_actions,
+                "retryUsed": False,
+                "fallbackUsed": True,
+                "parseRepairUsed": False,
+                "conversationFallback": True,
+            },
+        }
     actions = []
     builder_text = ""
     should_build = convo["should_build"] or prompt_wants_actions(prompt)

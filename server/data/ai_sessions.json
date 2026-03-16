@@ -273,6 +273,92 @@
         }
       ],
       "updatedAt": "2026-03-16T15:19:04.708Z"
+    },
+    "session-1773678153273": {
+      "createdAt": "2026-03-16T16:22:41.829Z",
+      "history": [
+        {
+          "role": "user",
+          "content": "Wire components for me",
+          "timestamp": "2026-03-16T16:22:41.829Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Done: added 3 wire(s).",
+          "timestamp": "2026-03-16T16:22:41.829Z"
+        },
+        {
+          "role": "user",
+          "content": "Generate C++ code",
+          "timestamp": "2026-03-16T16:22:47.967Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Done: added 3 wire(s), updated code, started build/verify.",
+          "timestamp": "2026-03-16T16:22:47.967Z"
+        },
+        {
+          "role": "user",
+          "content": "hi",
+          "timestamp": "2026-03-16T16:30:08.080Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Hello! How can I help you today?",
+          "timestamp": "2026-03-16T16:30:08.080Z"
+        },
+        {
+          "role": "user",
+          "content": "who are you",
+          "timestamp": "2026-03-16T16:30:16.481Z"
+        },
+        {
+          "role": "assistant",
+          "content": "I could not reach model `gemini-2.5-flash` right now (503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}). Try again or choose a different model.",
+          "timestamp": "2026-03-16T16:30:16.482Z"
+        },
+        {
+          "role": "user",
+          "content": "hello",
+          "timestamp": "2026-03-16T16:34:19.571Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Hello! How can I help you today?",
+          "timestamp": "2026-03-16T16:34:19.572Z"
+        },
+        {
+          "role": "user",
+          "content": "Wire components for me",
+          "timestamp": "2026-03-16T16:34:39.586Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Done: added 3 wire(s).",
+          "timestamp": "2026-03-16T16:34:39.586Z"
+        },
+        {
+          "role": "user",
+          "content": "make the blink every 3 seconds",
+          "timestamp": "2026-03-16T16:35:08.732Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Done: updated code, started build/verify, started simulation.",
+          "timestamp": "2026-03-16T16:35:08.733Z"
+        },
+        {
+          "role": "user",
+          "content": "Wire components for me",
+          "timestamp": "2026-03-16T16:38:51.340Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Done: added 4 wire(s).",
+          "timestamp": "2026-03-16T16:38:51.340Z"
+        }
+      ],
+      "updatedAt": "2026-03-16T16:38:51.340Z"
     }
   }
 }
