@@ -128,16 +128,94 @@ Detailed documentation about specific parts of the project can be found in the f
 
 This project is optimized for deployment on **Google Cloud Platform (GCP)**.
 
-### 1. Google Cloud Run (Containerized Backend + Frontend)
-The `Dockerfile` is configured to build the frontend and serve it alongside the Node.js backend.
-- Build the image: `gcloud builds submit --tag gcr.io/[PROJECT_ID]/simuide`
-- Deploy to Cloud Run: `gcloud run deploy simuide --image gcr.io/[PROJECT_ID]/simuide --platform managed`
+### 1. CI/CD Automation with Cloud Build Trigger (Production)
+This repository includes `cloudbuild.yaml` for automated build + deploy to Cloud Run.
 
-### 2. Environment Variables
-Ensure the following variables are set in your Cloud Run environment:
-- `GEMINI_API_KEY`: Your Google Gemini API key.
-- `MONGODB_URI`: Connection string for your MongoDB Atlas cluster.
-- `NODE_ENV`: `production`
+One-time setup:
+
+```bash
+# Set project context
+gcloud config set project PROJECT_ID
+
+# Enable required APIs
+gcloud services enable \
+  run.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com \
+  secretmanager.googleapis.com
+
+# Create Artifact Registry Docker repo
+gcloud artifacts repositories create simuide \
+  --repository-format=docker \
+  --location=asia-south1 \
+  --description="SimuIDE production images"
+
+# Create runtime secrets (update values as needed)
+printf '%s' 'YOUR_GEMINI_API_KEY' | gcloud secrets create GEMINI_API_KEY --data-file=- || true
+printf '%s' 'YOUR_MONGODB_URI' | gcloud secrets create MONGODB_URI --data-file=- || true
+
+# Add new versions when rotating values
+printf '%s' 'YOUR_GEMINI_API_KEY' | gcloud secrets versions add GEMINI_API_KEY --data-file=-
+printf '%s' 'YOUR_MONGODB_URI' | gcloud secrets versions add MONGODB_URI --data-file=-
+```
+
+Grant Cloud Build access to deploy Cloud Run and read secrets:
+
+```bash
+PROJECT_NUMBER="$(gcloud projects describe PROJECT_ID --format='value(projectNumber)')"
+CLOUDBUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:${CLOUDBUILD_SA}" \
+  --role="roles/run.admin"
+
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:${CLOUDBUILD_SA}" \
+  --role="roles/iam.serviceAccountUser"
+
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:${CLOUDBUILD_SA}" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+Create trigger (GitHub repo example):
+
+```bash
+gcloud builds triggers create github \
+  --name="simuide-prod-main" \
+  --repo-name="REPO_NAME" \
+  --repo-owner="GITHUB_OWNER" \
+  --branch-pattern="^main$" \
+  --build-config="cloudbuild.yaml" \
+  --substitutions="_REGION=asia-south1,_SERVICE_NAME=simuide,_REPO_NAME=simuide,_IMAGE_NAME=web,_ALLOW_UNAUTHENTICATED=true,_GEMINI_AGENT_MODEL=gemini-2.5-flash,_GEMINI_API_KEY_SECRET=GEMINI_API_KEY,_MONGODB_URI_SECRET=MONGODB_URI"
+```
+
+### 2. Required Runtime Configuration
+Cloud Run deploy step sets:
+- `NODE_ENV=production`
+- `PORT=3000`
+- `GEMINI_AGENT_MODEL=gemini-2.5-flash` (override via trigger substitutions)
+
+Cloud Run deploy step reads secrets via Secret Manager:
+- `GEMINI_API_KEY`
+- `MONGODB_URI`
+
+### 3. Manual Operations (if needed)
+Manual deploy from latest commit:
+
+```bash
+gcloud builds submit --config cloudbuild.yaml \
+  --substitutions="_REGION=asia-south1,_SERVICE_NAME=simuide,_REPO_NAME=simuide,_IMAGE_NAME=web"
+```
+
+Rollback to previous revision:
+
+```bash
+gcloud run revisions list --service=simuide --region=asia-south1
+gcloud run services update-traffic simuide \
+  --region=asia-south1 \
+  --to-revisions REVISION_NAME=100
+```
 
 ## Contributing
 
