@@ -9,7 +9,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # Install dependencies (prefer lockfile for reproducibility)
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+RUN if [ -f package-lock.json ]; then npm ci || npm install; else npm install; fi
 
 # Copy source code
 COPY . .
@@ -67,11 +67,11 @@ COPY server/ ./server/
 COPY package.json package-lock.json* ./
 
 # Install root production dependencies (vite build tooling not included via --omit=dev)
-RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev || npm install --omit=dev; else npm install --omit=dev; fi
 
 # Install server-specific production dependencies (express, cors, mongoose, etc.)
 # The server/ directory has its own package.json and must be installed separately.
-RUN cd server && if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+RUN cd server && if [ -f package-lock.json ]; then npm ci --omit=dev || npm install --omit=dev; else npm install --omit=dev; fi
 
 # Expose port (Matches server/index.js default)
 EXPOSE 3000
