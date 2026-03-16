@@ -750,7 +750,22 @@ export function CircuitCanvas({
     if (!comp) return null;
     const pins = typePinsCache.current.get(comp.type);
     if (!pins) return null;
-    const pin = pins.find(p => p.name === pinName);
+    const direct = pins.find(p => p.name === pinName);
+    const ci = direct || pins.find(p => p.name.toLowerCase() === String(pinName || '').toLowerCase());
+    const aliases: Record<string, string[]> = {
+      A: ['anode', 'a'],
+      C: ['cathode', 'c'],
+      GND: ['ground', 'gnd'],
+      VCC: ['vcc', 'vin', '5v'],
+      '13': ['d13', 'pin13', '13'],
+    };
+    const aliasMatch = ci || (() => {
+      const key = String(pinName || '').toUpperCase();
+      const options = aliases[key];
+      if (!options) return undefined;
+      return pins.find(p => options.includes(p.name.toLowerCase()));
+    })();
+    const pin = aliasMatch || pins[0];
     if (!pin) return null;
     return { x: comp.x + pin.x, y: comp.y + pin.y };
   }, [localComponents]);

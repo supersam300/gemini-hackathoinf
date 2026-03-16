@@ -15,9 +15,10 @@ export interface ChatMessage {
 
 interface AIPanelProps {
   messages: ChatMessage[];
-  onSendMessage: (content: string) => void;
+  onSendMessage: (content: string, model?: string) => void;
   onVisualQA?: (prompt: string) => void;
   onBuild?: () => void;
+  onCanvasJsonInteract?: (prompt: string, model?: string) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
   darkMode?: boolean;
@@ -30,20 +31,17 @@ const suggestedPrompts = [
   'Explain this circuit',
 ];
 
-const geminiModels = [
-  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', tag: 'Preview' },
-  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', tag: 'Preview' },
-  { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash-Lite', tag: 'Preview' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', tag: 'Stable' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', tag: 'Stable' },
-  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite', tag: 'Stable' },
+const localModels = [
+  { id: 'gemma3:latest', label: 'Gemma 3', tag: 'Local (Ollama)' },
+  { id: 'gemma3:4b', label: 'Gemma 3 4B', tag: 'Local (Ollama)' },
+  { id: 'gemma3:12b', label: 'Gemma 3 12B', tag: 'Local (Ollama)' },
 ];
 
-export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, collapsed, onToggleCollapse, darkMode }: AIPanelProps) {
+export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, onCanvasJsonInteract, collapsed, onToggleCollapse, darkMode }: AIPanelProps) {
   const dm = darkMode;
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
+  const [selectedModel, setSelectedModel] = useState('gemma3:latest');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -56,7 +54,7 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, collapse
     if (!trimmed) return;
     setInput('');
     setIsTyping(true);
-    onSendMessage(trimmed);
+    onSendMessage(trimmed, selectedModel);
     setTimeout(() => setIsTyping(false), 1200);
   };
 
@@ -80,7 +78,7 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, collapse
         </button>
         <div className="flex-1 flex items-center justify-center">
           <p className={`text-[11px] whitespace-nowrap ${dm ? 'text-[#777]' : 'text-[#aaa]'}`} style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
-            Gemini Live Agent
+            Local AI Agent
           </p>
         </div>
       </div>
@@ -98,7 +96,7 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, collapse
           <div className="w-[20px] h-[20px] rounded-full bg-gradient-to-br from-[#4285f4] to-[#8b5cf6] flex items-center justify-center shadow-sm">
             <Bot size={11} className="text-white" />
           </div>
-          <span className={`text-[12px] font-semibold ${dm ? 'text-[#e0e0e0]' : 'text-[#1a1a1a]'}`}>Gemini Live Agent</span>
+          <span className={`text-[12px] font-semibold ${dm ? 'text-[#e0e0e0]' : 'text-[#1a1a1a]'}`}>Local AI Agent</span>
           <div className="w-2 h-2 rounded-full bg-emerald-500 ml-0.5 animate-pulse" title="Online" />
         </div>
         <div className="ml-auto flex items-center gap-1">
@@ -120,7 +118,7 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, collapse
           onChange={(e) => setSelectedModel(e.target.value)}
           className={`text-[10px] border px-1.5 py-0.5 rounded shadow-sm outline-none cursor-pointer hover:border-[#1565c0] focus:border-[#1565c0] focus:ring-1 focus:ring-[#1565c0]/20 transition-colors ${dm ? 'bg-[#2a2a2a] border-[#444] text-[#ccc]' : 'bg-white border-[#d4d4d4] text-[#555]'}`}
         >
-          {geminiModels.map(m => (
+          {localModels.map(m => (
             <option key={m.id} value={m.id}>
               {m.label} ({m.tag})
             </option>
@@ -214,7 +212,7 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, collapse
           <button
             key={p}
             className={`text-[10px] px-2 py-0.5 border rounded-full transition-colors ${dm ? 'border-[#444] bg-[#2a2a2a] hover:bg-[#1e3a5f] hover:border-[#4285f4] hover:text-[#7abaff] text-[#999]' : 'border-[#ccc] bg-white hover:bg-[#e8f0fe] hover:border-[#4285f4] hover:text-[#1565c0] text-[#555]'}`}
-            onClick={() => onSendMessage(p)}
+            onClick={() => onSendMessage(p, selectedModel)}
           >
             {p}
           </button>
@@ -229,7 +227,7 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, collapse
                if (onVisualQA) onVisualQA(input.trim() || "Please analyze this circuit.");
                setInput("");
             }}
-            title="Analyze screenshot of circuit with Gemini"
+            title="Analyze screenshot of circuit with local model"
             className={`shrink-0 flex items-center justify-center p-1.5 rounded-md transition-colors duration-150 ${dm ? 'text-[#888] hover:text-[#fff] hover:bg-[#444]' : 'text-[#888] hover:text-[#333] hover:bg-[#e8e8e8]'}`}
           >
             <Camera size={14} />
@@ -238,7 +236,7 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, collapse
             ref={inputRef}
             rows={1}
             className={`flex-1 bg-transparent outline-none text-[12px] resize-none ${dm ? 'text-[#ccc] placeholder-[#666]' : 'text-[#1a1a1a] placeholder-[#bbb]'}`}
-            placeholder="Ask Gemini..."
+            placeholder="Ask local Gemma..."
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -260,8 +258,20 @@ export function AIPanel({ messages, onSendMessage, onVisualQA, onBuild, collapse
         <p className={`text-[10px] mt-1.5 text-center ${dm ? 'text-[#555]' : 'text-[#ccc]'}`}>Shift+Enter for new line</p>
       </div>
 
-      {/* Build Project button */}
-      <div className="px-3 pb-3 pt-1.5 shrink-0">
+      {/* Builder action buttons */}
+      <div className="px-3 pb-3 pt-1.5 shrink-0 space-y-2">
+        <button
+          onClick={() => {
+            if (!onCanvasJsonInteract) return;
+            onCanvasJsonInteract(input.trim() || 'Analyze canvas JSON and apply required wiring/code changes.', selectedModel);
+            setInput('');
+          }}
+          className="w-full h-[34px] flex items-center justify-center gap-2 bg-gradient-to-b from-[#1f3a2d] to-[#173025] text-white text-[12px] font-semibold rounded-lg hover:from-[#28523e] hover:to-[#1f4634] transition-all duration-150 shadow-md"
+          title="Use dedicated canvas JSON interaction"
+        >
+          <Code2 size={13} className="text-[#8cf5be]" />
+          Canvas JSON Agent
+        </button>
         <button
           onClick={onBuild}
           className="w-full h-[36px] flex items-center justify-center gap-2 bg-gradient-to-b from-[#1a1a2e] to-[#16213e] text-white text-[13px] font-semibold rounded-lg hover:from-[#2a2a3e] hover:to-[#26314e] transition-all duration-150 shadow-md group"

@@ -1,6 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const { similaritySearch, ingestDocument, analyzeImage, runCanvasAgent } = require("../services/geminiService");
+const { getHistory, appendTurn } = require("../services/aiSessionStore");
+const { randomUUID } = require("crypto");
 
 // POST /api/ai/ingest
 router.post("/ingest", async (req, res) => {
@@ -56,15 +58,17 @@ const path = require('path');
 // POST /api/ai/agent
 router.post("/agent", async (req, res) => {
     try {
-        const { prompt, canvasState, image } = req.body;
+        const { prompt, canvasState, image, model, sessionId, mode } = req.body;
         if (!prompt) {
             return res.status(400).json({ success: false, error: "Prompt is required" });
         }
+        const resolvedSessionId = sessionId || randomUUID();
+        const history = getHistory(resolvedSessionId);
 
         const scriptPath = path.join(__dirname, "../services/agent.py");
         const pythonExecutable = "python3";
 
-        console.log("[POST /api/ai/agent] Spawning python, GEMINI_API_KEY exists?", !!process.env.GEMINI_API_KEY);
+        console.log("[POST /api/ai/agent] Spawning local AI agent process");
 
         const env = { ...process.env }; // Just pass standard env which includes GEMINI_API_KEY
 
@@ -92,7 +96,11 @@ router.post("/agent", async (req, res) => {
         pythonProcess.stdin.write(JSON.stringify({ 
             prompt, 
             canvasState: canvasState || {},
-            image
+            image,
+            model,
+            sessionId: resolvedSessionId,
+            history,
+            mode
         }));
         pythonProcess.stdin.end();
 
@@ -108,7 +116,18 @@ router.post("/agent", async (req, res) => {
             try {
                 // Parse the final JSON from the python script
                 const result = JSON.parse(outputData);
-                res.status(200).json(result);
+                console.log(
+                    "[POST /api/ai/agent] result:",
+                    { success: !!result.success, actionCount: Array.isArray(result.actions) ? result.actions.length : 0 }
+                );
+                if (result.success) {
+                    appendTurn(resolvedSessionId, "user", prompt);
+                    appendTurn(resolvedSessionId, "assistant", result.text || "");
+                }
+                res.status(200).json({
+                    ...result,
+                    sessionId: resolvedSessionId,
+                });
             } catch (e) {
                 console.error("[POST /api/ai/agent] Failed to parse python output:", outputData);
                 res.status(500).json({ success: false, error: "Invalid agent output formatting" });
@@ -118,6 +137,21 @@ router.post("/agent", async (req, res) => {
     } catch (error) {
         console.error("[POST /api/ai/agent] error:", error);
         res.status(500).json({ success: false, error: "Failed to run agent" });
+    }
+});
+
+// GET /api/ai/history/:sessionId
+router.get("/history/:sessionId", (req, res) => {
+    try {
+        const sessionId = req.params.sessionId;
+        if (!sessionId) {
+            return res.status(400).json({ success: false, error: "sessionId is required" });
+        }
+        const history = getHistory(sessionId);
+        res.status(200).json({ success: true, sessionId, history });
+    } catch (error) {
+        console.error("[GET /api/ai/history/:sessionId] error:", error);
+        res.status(500).json({ success: false, error: "Failed to load history" });
     }
 });
 

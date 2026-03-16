@@ -52,6 +52,47 @@ const initialMessages: ChatMessage[] = [
   },
 ];
 
+const CHAT_HISTORY_KEY = 'simuide-ai-chat-history';
+const CHAT_SESSION_KEY = 'simuide-ai-session-id';
+const CANVAS_PROJECT_STORAGE_KEY = 'simuide-canvas-project';
+
+function shouldUseCanvasVisionBuildTool(prompt: string): boolean {
+  const text = prompt.trim().toLowerCase();
+  if (!text) return false;
+
+  const buildIntent =
+    /(build|compile|run|simulate|start)\b/.test(text) &&
+    /(project|codebase|code|circuit)\b/.test(text);
+  const canvasIntent =
+    /(from canvas|using canvas|look at canvas|take (a )?(picture|snapshot)|image|refer)/.test(text);
+  const shorthandBuildIntent =
+    /(build this|make it run|run this|build and run)/.test(text);
+
+  return buildIntent || canvasIntent || shorthandBuildIntent;
+}
+
+async function captureCanvasSnapshotBase64(darkMode: boolean): Promise<string | null> {
+  const el = document.getElementById('circuit-canvas-container');
+  if (!el) return null;
+  const canvas = await html2canvas(el, {
+    backgroundColor: darkMode ? '#1e1e1e' : '#ffffff',
+    scale: 1,
+  });
+  return canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+}
+
+function loadSavedMessages(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(CHAT_HISTORY_KEY);
+    if (!raw) return initialMessages;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return initialMessages;
+    return parsed;
+  } catch {
+    return initialMessages;
+  }
+}
+
 const defaultCodeTab: OpenTab = {
   id: 'blink-ino',
   name: 'Blink.ino',
@@ -71,7 +112,8 @@ export default function App() {
   const [components, setComponents] = useState<PlacedComponent[]>(initialComponents);
   const [wiresState, setWiresState] = useState<Wire[]>([]);
   const [selectedLibComponent, setSelectedLibComponent] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => loadSavedMessages());
+  const [aiSessionId, setAiSessionId] = useState<string>(() => localStorage.getItem(CHAT_SESSION_KEY) || '');
   const [coordinates, setCoordinates] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(false);
   const aiResponseIdx = useRef(0);
@@ -123,6 +165,15 @@ export default function App() {
       editorStore.setCode(activeTab.content);
     }
   }, [codeActiveTabId, codeTabs]);
+
+  // Persist AI chat history and session locally so conversations survive reload.
+  useEffect(() => {
+    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(messages));
+  }, [messages]);
+
+  useEffect(() => {
+    if (aiSessionId) localStorage.setItem(CHAT_SESSION_KEY, aiSessionId);
+  }, [aiSessionId]);
 
   // ── Code Editor handlers ────────────────────────────────────────────────
   const handleOpenFile = useCallback(
@@ -466,102 +517,341 @@ export default function App() {
       }
       
       if (!data.actions || !Array.isArray(data.actions)) return;
+      let nextComponents = [...components];
+      let nextWires = [...wiresState];
+      let componentsChanged = false;
+      let wiresChanged = false;
+      let shouldStartSimulation = false;
+      let shouldStopSimulation = false;
+      let shouldVerifyBuild = false;
+
+      const normalizeActionType = (value: unknown) => {
+        const t = String(value || '').trim().toUpperCase();
+        if (t === 'BUILD_PROJECT' || t === 'TEST_PROJECT' || t === 'COMPILE') return 'VERIFY_BUILD';
+        if (t === 'SIMULATE' || t === 'RUN_SIMULATION') return 'START_SIMULATION';
+        return t;
+      };
+
+      const normalizeComponentType = (value: unknown) => {
+        const raw = String(value || '').trim().toLowerCase();
+        const aliases: Record<string, string> = {
+          'arduino': 'arduino-uno',
+          'arduino uno': 'arduino-uno',
+          'uno': 'arduino-uno',
+          'ground': 'gnd',
+        };
+        return aliases[raw] || raw;
+      };
+
+      const norm = (v: unknown) => String(v || '').trim().toLowerCase();
+      const resolveComponentId = (ref: unknown): string | null => {
+        const token = String(ref || '').trim();
+        if (!token) return null;
+        // exact ID
+        const exact = nextComponents.find(c => c.id === token);
+        if (exact) return exact.id;
+        // id, label, or type case-insensitive
+        const n = token.toLowerCase();
+        const ci = nextComponents.find(c =>
+          c.id.toLowerCase() === n ||
+          c.label.toLowerCase() === n ||
+          c.type.toLowerCase() === n
+        );
+        return ci?.id || null;
+      };
+      const normalizePin = (pin: string) => {
+        const raw = String(pin || '').trim();
+        if (!raw) return '';
+        const p = raw.toUpperCase().replace(/\s+/g, '');
+        const aliases: Record<string, string> = {
+          ANODE: 'A',
+          CATHODE: 'C',
+          GROUND: 'GND',
+          VPLUS: 'VCC',
+          VIN: 'VCC',
+          PIN13: '13',
+          D13: '13',
+        };
+        return aliases[p] || raw;
+      };
+      const defaultPinFor = (compType: string, side: 'from' | 'to') => {
+        const t = norm(compType);
+        if (t.includes('arduino')) return side === 'from' ? '13' : 'GND';
+        if (t === 'led') return side === 'from' ? 'A' : 'C';
+        if (t === 'resistor' || t === 'capacitor') return side === 'from' ? '1' : '2';
+        if (t === 'battery') return side === 'from' ? 'POS' : 'NEG';
+        if (t === 'vcc') return 'VCC';
+        if (t === 'gnd') return 'GND';
+        return side === 'from' ? 'out-0' : 'in-0';
+      };
+      const parseEndpoint = (value: unknown, side: 'from' | 'to') => {
+        const s = String(value || '').trim();
+        if (!s) return null;
+        // support "id:pin" and "id.pin"
+        let compRef = s;
+        let pinRef = '';
+        if (s.includes(':')) {
+          const idx = s.indexOf(':');
+          compRef = s.slice(0, idx).trim();
+          pinRef = s.slice(idx + 1).trim();
+        } else if (s.includes('.')) {
+          const idx = s.lastIndexOf('.');
+          compRef = s.slice(0, idx).trim();
+          pinRef = s.slice(idx + 1).trim();
+        }
+        const compId = resolveComponentId(compRef);
+        if (!compId) return null;
+        const comp = nextComponents.find(c => c.id === compId);
+        const pinName = normalizePin(pinRef) || defaultPinFor(comp?.type || '', side);
+        return { compId, pinName };
+      };
+
+      const parseEndpointFromAction = (action: any, side: 'from' | 'to') => {
+        const endpointRaw = action?.[side];
+        if (typeof endpointRaw === 'object' && endpointRaw !== null) {
+          const compRef = endpointRaw.componentId || endpointRaw.component || endpointRaw.id || endpointRaw.label;
+          const pin = endpointRaw.pin || endpointRaw.pinName || endpointRaw.handle;
+          if (!compRef) return null;
+          return parseEndpoint(`${compRef}:${pin || ''}`, side);
+        }
+        if (!endpointRaw) {
+          const compRef = action?.[`${side}ComponentId`] || action?.[`${side}Id`] || action?.[`${side}Label`];
+          const pin = action?.[`${side}Pin`] || action?.[`${side}PinName`] || action?.[`${side}Handle`];
+          if (!compRef) return null;
+          return parseEndpoint(`${compRef}:${pin || ''}`, side);
+        }
+        return parseEndpoint(endpointRaw, side);
+      };
+
+      const normalizeIncomingCode = (rawCode: unknown): string => {
+        let value = typeof rawCode === 'string' ? rawCode : String(rawCode ?? '');
+        if (!value) return '';
+
+        // Handle model responses that wrap code as a quoted JSON string.
+        // Example: "\"int x = 1;\\nvoid setup(){}\""
+        const trimmed = value.trim();
+        const looksQuoted =
+          (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+          (trimmed.startsWith("'") && trimmed.endsWith("'"));
+        if (looksQuoted) {
+          try {
+            value = JSON.parse(trimmed);
+          } catch {
+            value = trimmed.slice(1, -1);
+          }
+        }
+
+        // If code is double-escaped and still contains literal \n/\t, decode once.
+        if (!value.includes('\n') && (value.includes('\\n') || value.includes('\\t') || value.includes('\\"'))) {
+          try {
+            value = JSON.parse(`"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
+          } catch {
+            value = value
+              .replace(/\\n/g, '\n')
+              .replace(/\\t/g, '\t')
+              .replace(/\\"/g, '"')
+              .replace(/\\\\/g, '\\');
+          }
+        }
+
+        return value.replace(/\r\n/g, '\n');
+      };
+
+      const updateFileTreeContent = (fileName: string, fileContent: string) => {
+        const normalizedInput = fileName.trim().toLowerCase();
+        const normalizedTarget = normalizedInput === 'sketch.ino' ? 'blink.ino' : normalizedInput;
+        const extension = (fileName.split('.').pop() || '').toLowerCase();
+        let matchedNodeId: string | null = null;
+
+        setIdeFileTree((prev) => {
+          const patchNodes = (nodes: FileNode[]): FileNode[] => {
+            return nodes.map((node) => {
+              if (node.type === 'file') {
+                const nodeName = node.name.toLowerCase();
+                const sameName = nodeName === normalizedTarget || (normalizedTarget === 'blink.ino' && nodeName === 'sketch.ino');
+                if (sameName) {
+                  matchedNodeId = node.id;
+                  return { ...node, content: fileContent };
+                }
+                return node;
+              }
+              if (node.type === 'folder' && node.children) {
+                return { ...node, children: patchNodes(node.children) };
+              }
+              return node;
+            });
+          };
+
+          const patched = patchNodes(prev);
+          if (matchedNodeId) return patched;
+
+          const insertIntoProjectFolder = (nodes: FileNode[]): FileNode[] => {
+            return nodes.map((node) => {
+              if (
+                node.type === 'folder' &&
+                (node.id === 'default-project' || node.name.toLowerCase() === 'myproject')
+              ) {
+                const newId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+                matchedNodeId = newId;
+                const newFile: FileNode = {
+                  id: newId,
+                  name: fileName,
+                  type: 'file',
+                  extension,
+                  content: fileContent,
+                };
+                return { ...node, children: [...(node.children || []), newFile] };
+              }
+              if (node.type === 'folder' && node.children) {
+                return { ...node, children: insertIntoProjectFolder(node.children) };
+              }
+              return node;
+            });
+          };
+
+          return insertIntoProjectFolder(patched);
+        });
+
+        return matchedNodeId;
+      };
 
       data.actions.forEach((action: any) => {
-        switch (action.type) {
+        const actionType = normalizeActionType(action?.type);
+        switch (actionType) {
           case 'PLACE_COMPONENT': {
             // Use action.id or action.label as the deterministc ID so wires can connect to it.
             // Fall back to a random ID if neither is provided.
-            const compId = action.id || action.label || `${action.componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+            const componentType = normalizeComponentType(
+              action.componentType || action.component || action.name || action.typeName
+            );
+            const compLabel = action.label || action.componentId || action.id || componentType.toUpperCase();
+            const compId = action.id || action.componentId || action.label || `${componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
             const newComp: PlacedComponent = {
               id: compId,
-              type: action.componentType,
+              type: componentType,
               x: action.x || 100,
               y: action.y || 100,
-              label: action.label || action.componentType.toUpperCase(),
+              label: compLabel,
               selected: false,
               rotation: 0,
               attrs: action.properties || {},
             };
-            setComponents(prev => [...prev, newComp]);
+            if (!nextComponents.some(c => c.id === newComp.id)) {
+              nextComponents.push(newComp);
+              componentsChanged = true;
+            }
             setStatusMessage(`AI placed ${action.componentType}`);
             break;
           }
           case 'ADD_WIRE': {
-            const fromStr = action.from || action.from1;
-            const toStr = action.to;
-            if (!fromStr || !toStr) break;
-            const [fromId, fromPinName] = fromStr.split(':');
-            const [toId, toPinName] = toStr.split(':');
-            if (fromId && toId) {
-              const newWire: Wire = {
-                id: `w-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-                fromComponentId: fromId,
-                fromPinName: fromPinName || 'in-0',
-                toComponentId: toId,
-                toPinName: toPinName || 'out-0',
-                color: 'red',
-              };
-              setWiresState(prev => [...prev, newWire]);
+            const from = parseEndpointFromAction(action, 'from');
+            const to = parseEndpointFromAction(action, 'to');
+            if (from && to && from.compId !== to.compId) {
+              const dupe = nextWires.some(w =>
+                w.fromComponentId === from.compId &&
+                w.fromPinName === from.pinName &&
+                w.toComponentId === to.compId &&
+                w.toPinName === to.pinName
+              );
+              if (!dupe) {
+                const newWire: Wire = {
+                  id: action.wireId || `w-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+                  fromComponentId: from.compId,
+                  fromPinName: from.pinName,
+                  toComponentId: to.compId,
+                  toPinName: to.pinName,
+                  color: 'red',
+                };
+                nextWires.push(newWire);
+                wiresChanged = true;
+              }
               setStatusMessage('AI added a wire');
             }
             break;
           }
           case 'DELETE_COMPONENT': {
             if (action.componentId) {
-              setComponents(prev => prev.filter(c => c.id !== action.componentId));
-              setWiresState(prev => prev.filter(w => w.fromComponentId !== action.componentId && w.toComponentId !== action.componentId));
-              setStatusMessage(`AI deleted component ${action.componentId}`);
+              const resolvedId = resolveComponentId(action.componentId);
+              if (resolvedId) {
+                nextComponents = nextComponents.filter(c => c.id !== resolvedId);
+                nextWires = nextWires.filter(w => w.fromComponentId !== resolvedId && w.toComponentId !== resolvedId);
+                componentsChanged = true;
+                wiresChanged = true;
+                setStatusMessage(`AI deleted component ${resolvedId}`);
+              }
             }
             break;
           }
           case 'DELETE_WIRE': {
             if (action.wireId) {
-              setWiresState(prev => prev.filter(w => w.id !== action.wireId));
+              const before = nextWires.length;
+              nextWires = nextWires.filter(w => w.id !== action.wireId);
+              if (nextWires.length !== before) wiresChanged = true;
               setStatusMessage('AI deleted a wire');
             }
             break;
           }
           case 'START_SIMULATION':
-            handleSimulate();
+            shouldStartSimulation = true;
             break;
           case 'STOP_SIMULATION':
-            simulationStore.stopSimulation();
+            shouldStopSimulation = true;
             break;
           case 'UPDATE_CODE': {
             if (action.code) {
-              const fileName = action.fileName || 'blink.ino';
+              const normalizedCode = normalizeIncomingCode(action.code);
+              const requestedName = String(action.fileName || 'Blink.ino');
+              const normalizedName = requestedName.trim().toLowerCase();
+              const fileName = normalizedName === 'sketch.ino' ? 'Blink.ino' : requestedName;
+              let activeTabIdToOpen: string | null = null;
               setCodeTabs(prev => {
-                const existing = prev.find(t => t.name === fileName);
+                const existing = prev.find(t => t.name.toLowerCase() === fileName.toLowerCase());
                 if (existing) {
-                  return prev.map(t => t.name === fileName ? { ...t, content: action.code, isDirty: true } : t);
+                  activeTabIdToOpen = existing.id;
+                  return prev.map(t => t.name.toLowerCase() === fileName.toLowerCase() ? { ...t, content: normalizedCode, isDirty: true } : t);
                 } else {
+                  const newId = `${Date.now()}-${fileName}`;
+                  activeTabIdToOpen = newId;
                   return [...prev, {
-                    id: `${Date.now()}-${fileName}`,
+                    id: newId,
                     name: fileName,
-                    content: action.code,
+                    content: normalizedCode,
                     isDirty: true,
                     extension: fileName.split('.').pop() || '',
                   }];
                 }
               });
+              const treeNodeId = updateFileTreeContent(fileName, normalizedCode);
+              if (activeTabIdToOpen) setCodeActiveTabId(activeTabIdToOpen);
+              else if (treeNodeId) setCodeActiveTabId(treeNodeId);
               setStatusMessage(`AI updated code: ${fileName}`);
               setBottomVisible(true);
               setBottomTab('output'); 
             }
             break;
           }
+          case 'VERIFY_BUILD':
+            shouldVerifyBuild = true;
+            break;
           default:
-            console.warn('Unknown AI action:', action.type);
+            console.warn('Unknown AI action:', actionType);
         }
       });
+      if (componentsChanged) setComponents(nextComponents);
+      if (wiresChanged) setWiresState(nextWires);
+      if (componentsChanged || wiresChanged) {
+        pushHistory(nextComponents, nextWires);
+      }
+      if (shouldStopSimulation) simulationStore.stopSimulation();
+      if (shouldVerifyBuild) setTimeout(() => handleVerify(), 0);
+      if (shouldStartSimulation) setTimeout(() => handleSimulate(), 0);
     } catch (e) {
       console.error('Failed to execute AI actions:', e);
     }
-  }, [handleSimulate, simulationStore]);
+  }, [components, wiresState, handleSimulate, handleVerify, simulationStore, pushHistory, setIdeFileTree]);
 
   // ── AI Chat — send message to Gemini agent (Multimodal) ──────────────────
-  const handleSendMessage = useCallback(async (content: string) => {
+  const handleSendMessage = useCallback(async (content: string, model?: string) => {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
@@ -570,33 +860,54 @@ export default function App() {
       timestamp: now,
     };
     setMessages(prev => [...prev, userMsg]);
-    setStatusMessage('Agent is capturing canvas & thinking...');
+    const useCanvasVisionBuildTool = shouldUseCanvasVisionBuildTool(content);
+    setStatusMessage(
+      useCanvasVisionBuildTool
+        ? 'Canvas Vision Build tool: capturing canvas & planning build...'
+        : 'Agent is capturing canvas & thinking...'
+    );
 
     try {
-      // Capture screenshot for multimodal support
-      const el = document.getElementById('circuit-canvas-container');
-      let base64Data = null;
-      if (el) {
-        const canvas = await html2canvas(el, {
-          backgroundColor: darkMode ? '#1e1e1e' : '#ffffff',
-          scale: 1,
-        });
-        base64Data = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-      }
+      const base64Data = await captureCanvasSnapshotBase64(darkMode);
+      const effectivePrompt = useCanvasVisionBuildTool
+        ? `${content}
+
+[Canvas Vision Build Tool]
+- Analyze the attached canvas screenshot and canvasState JSON.
+- Produce executable actions to make the project runnable.
+- Include UPDATE_CODE, VERIFY_BUILD, and START_SIMULATION when appropriate.
+`
+        : content;
 
       const response = await fetch('/api/ai/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: content,
+          prompt: effectivePrompt,
           canvasState: { components, wires: wiresState },
-          image: base64Data
+          image: base64Data,
+          model,
+          sessionId: aiSessionId || undefined,
+          mode: useCanvasVisionBuildTool ? 'canvas_json' : undefined,
         })
       });
 
-      const result = await response.json();
+      const raw = await response.text();
+      let result: any = null;
+      try {
+        result = raw ? JSON.parse(raw) : null;
+      } catch {
+        throw new Error(`AI endpoint returned invalid JSON (HTTP ${response.status})`);
+      }
+      if (!response.ok) {
+        throw new Error(result?.error || `AI endpoint failed (HTTP ${response.status})`);
+      }
       
-      if (result.success) {
+      if (result?.sessionId) {
+        setAiSessionId(result.sessionId);
+      }
+
+      if (result?.success) {
         const aiMsg: ChatMessage = {
           id: `a-${Date.now()}`,
           role: 'ai',
@@ -609,7 +920,11 @@ export default function App() {
         if (result.actions && result.actions.length > 0) {
           executeAIActions({ actions: result.actions });
         }
-        setStatusMessage('AI response received');
+        setStatusMessage(
+          useCanvasVisionBuildTool
+            ? `Canvas Vision Build tool applied ${result.actions?.length || 0} action(s)`
+            : 'AI response received'
+        );
       } else {
         throw new Error(result.error);
       }
@@ -623,7 +938,73 @@ export default function App() {
       }]);
       setStatusMessage('AI Chat failed');
     }
-  }, [components, wiresState, darkMode, executeAIActions]);
+  }, [components, wiresState, darkMode, executeAIActions, aiSessionId]);
+
+  // Dedicated interaction mode: sends raw canvas JSON intent directly to builder agent.
+  const handleCanvasJsonInteraction = useCallback(async (content: string, model?: string) => {
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setMessages(prev => [...prev, {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: `🧩 [Canvas JSON Mode]\n${content}`,
+      timestamp: now,
+    }]);
+    setStatusMessage('Canvas Vision Build tool is capturing snapshot and planning changes...');
+    try {
+      const base64Data = await captureCanvasSnapshotBase64(darkMode);
+      const response = await fetch('/api/ai/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `${content}
+
+[Canvas Vision Build Tool]
+- Use both canvasState and attached image.
+- Return executable actions only.
+- Build runnable project code when user asks to run/build.
+`,
+          canvasState: { components, wires: wiresState },
+          image: base64Data,
+          model,
+          sessionId: aiSessionId || undefined,
+          mode: 'canvas_json',
+        }),
+      });
+      const raw = await response.text();
+      let result: any = null;
+      try {
+        result = raw ? JSON.parse(raw) : null;
+      } catch {
+        throw new Error(`Canvas JSON endpoint returned invalid JSON (HTTP ${response.status})`);
+      }
+      if (!response.ok) throw new Error(result?.error || `Canvas JSON endpoint failed (HTTP ${response.status})`);
+      if (result?.sessionId) setAiSessionId(result.sessionId);
+      if (result?.success) {
+        setMessages(prev => [...prev, {
+          id: `a-${Date.now()}`,
+          role: 'ai',
+          content: result.text || 'Canvas JSON update prepared.',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }]);
+        if (result.actions?.length) {
+          executeAIActions({ actions: result.actions });
+          setStatusMessage(`Canvas JSON agent applied ${result.actions.length} action(s)`);
+        } else {
+          setStatusMessage('Canvas JSON agent returned no executable actions');
+        }
+      } else {
+        throw new Error(result?.error || 'Canvas JSON agent failed');
+      }
+    } catch (err: any) {
+      setMessages(prev => [...prev, {
+        id: `a-${Date.now()}`,
+        role: 'ai',
+        content: `Canvas JSON agent error: ${err.message}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }]);
+      setStatusMessage('Canvas JSON agent failed');
+    }
+  }, [components, wiresState, aiSessionId, executeAIActions, darkMode]);
 
   // ── AI Visual QA (Multimodal Gemini Vision) ─────────────────────────────
   const handleVisualQA = useCallback(async (prompt: string) => {
@@ -663,9 +1044,18 @@ export default function App() {
         body: JSON.stringify({ image: base64Data, prompt })
       });
       
-      const result = await response.json();
+      const raw = await response.text();
+      let result: any = null;
+      try {
+        result = raw ? JSON.parse(raw) : null;
+      } catch {
+        throw new Error(`Vision endpoint returned invalid JSON (HTTP ${response.status})`);
+      }
+      if (!response.ok) {
+        throw new Error(result?.error || `Vision endpoint failed (HTTP ${response.status})`);
+      }
       
-      if (result.success) {
+      if (result?.success) {
         setMessages(prev => [...prev, {
           id: `a-${Date.now()}`,
           role: 'ai',
@@ -727,6 +1117,16 @@ export default function App() {
     pushHistory(allComponents, allWires);
     setStatusMessage(`Pasted ${newComponents.length} component(s)`);
   }, [clipboard, components, wiresState, pushHistory]);
+
+  const applyImportedCanvasProject = useCallback((data: any) => {
+    if (!data || !Array.isArray(data.components) || !Array.isArray(data.wires)) {
+      throw new Error('Invalid canvas JSON format');
+    }
+    setComponents(data.components);
+    setWiresState(data.wires);
+    setHistory([{ components: data.components, wires: data.wires }]);
+    setHistoryIndex(0);
+  }, []);
 
   // ── Cloud Save / Load — directly using canvas state ───────────────────
   const handleCloudSave = useCallback(async () => {
@@ -820,12 +1220,32 @@ export default function App() {
           reader.onload = () => {
             try {
               const data = JSON.parse(reader.result as string);
-              if (data.components) setComponents(data.components);
-              if (data.wires) setWiresState(data.wires);
-              pushHistory(data.components || [], data.wires || []);
+              applyImportedCanvasProject(data);
               setStatusMessage(`Opened ${file.name}`);
             } catch {
               setStatusMessage('Failed to open file — invalid format');
+            }
+          };
+          reader.readAsText(file);
+        };
+        input.click();
+        break;
+      }
+      case 'Import Canvas JSON...': {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = () => {
+          const file = input.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            try {
+              const data = JSON.parse(reader.result as string);
+              applyImportedCanvasProject(data);
+              setStatusMessage(`Imported canvas JSON: ${file.name}`);
+            } catch {
+              setStatusMessage('Import failed — invalid canvas JSON format');
             }
           };
           reader.readAsText(file);
@@ -847,6 +1267,20 @@ export default function App() {
         setStatusMessage('Project saved');
         break;
       }
+      case 'Export Canvas JSON...': {
+        const data = JSON.stringify({ components, wires: wiresState }, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'canvas.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+        setStatusMessage('Canvas exported as JSON');
+        break;
+      }
       case 'Save As...': {
         const data = JSON.stringify({ components, wires: wiresState }, null, 2);
         const blob = new Blob([data], { type: 'application/json' });
@@ -859,6 +1293,33 @@ export default function App() {
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 100);
         setStatusMessage('Project saved as...');
+        break;
+      }
+      case 'Save to Local Storage': {
+        localStorage.setItem(
+          CANVAS_PROJECT_STORAGE_KEY,
+          JSON.stringify({
+            components,
+            wires: wiresState,
+            savedAt: new Date().toISOString(),
+          })
+        );
+        setStatusMessage('Project saved to local storage');
+        break;
+      }
+      case 'Load from Local Storage': {
+        try {
+          const raw = localStorage.getItem(CANVAS_PROJECT_STORAGE_KEY);
+          if (!raw) {
+            setStatusMessage('No locally saved project found');
+            break;
+          }
+          const parsed = JSON.parse(raw);
+          applyImportedCanvasProject(parsed);
+          setStatusMessage('Project loaded from local storage');
+        } catch {
+          setStatusMessage('Failed to load project from local storage');
+        }
         break;
       }
       case 'Export Project as ZIP...': {
@@ -1024,7 +1485,7 @@ export default function App() {
       default:
         setStatusMessage(`${action}`);
     }
-  }, [handleUndo, handleRedo, handleCopy, handlePaste, components, wiresState, pushHistory, handleVerify, handleUpload, activeView, simulationStore, handleSimulate]);
+  }, [handleUndo, handleRedo, handleCopy, handlePaste, components, wiresState, pushHistory, handleVerify, handleUpload, activeView, simulationStore, handleSimulate, applyImportedCanvasProject]);
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -1279,6 +1740,7 @@ export default function App() {
           onSendMessage={handleSendMessage}
           onVisualQA={handleVisualQA}
           onBuild={handleVerify}
+          onCanvasJsonInteract={handleCanvasJsonInteraction}
           collapsed={aiPanelCollapsed}
           onToggleCollapse={() => setAiPanelCollapsed(c => !c)}
           darkMode={darkMode}

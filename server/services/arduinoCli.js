@@ -3,13 +3,46 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
+function getArduinoCliInstallHint() {
+    switch (process.platform) {
+        case "darwin":
+            return "brew install arduino-cli";
+        case "linux":
+            return "Install arduino-cli (e.g. Arch: sudo pacman -S arduino-cli, Ubuntu: sudo snap install arduino-cli --classic)";
+        case "win32":
+            return "Install via winget: winget install ArduinoSA.CLI";
+        default:
+            return "Install arduino-cli and ensure it is in PATH";
+    }
+}
+
+function resolveArduinoCliBinary() {
+    const configured = process.env.ARDUINO_CLI_PATH || process.env.ARDUINO_CLI_BIN;
+    if (configured && fs.existsSync(configured)) {
+        return configured;
+    }
+
+    // Common locations for local/dev and containerized runtime.
+    const candidates = [
+        "/usr/local/bin/arduino-cli",
+        "/usr/bin/arduino-cli",
+    ];
+    for (const candidate of candidates) {
+        if (fs.existsSync(candidate)) return candidate;
+    }
+
+    // Fall back to PATH lookup by command name.
+    return "arduino-cli";
+}
+
 /**
  * Run an arduino-cli command and stream output.
  * Returns { success, output, error }
  */
 function runArduinoCli(args, opts = {}) {
     return new Promise((resolve) => {
-        const proc = spawn("arduino-cli", args, {
+        const arduinoCli = resolveArduinoCliBinary();
+        const proc = spawn(arduinoCli, args, {
             ...opts,
             env: { ...process.env },
         });
@@ -29,10 +62,14 @@ function runArduinoCli(args, opts = {}) {
         });
 
         proc.on("error", (err) => {
+            const hint = getArduinoCliInstallHint();
+            const missingBinaryError = err.code === "ENOENT"
+                ? `Failed to start arduino-cli (${arduinoCli}): ${err.message}. ${hint}. You can also set ARDUINO_CLI_PATH=/absolute/path/to/arduino-cli.`
+                : `Failed to start arduino-cli (${arduinoCli}): ${err.message}.`;
             resolve({
                 success: false,
                 output: "",
-                error: `Failed to start arduino-cli: ${err.message}. Make sure it is installed (brew install arduino-cli).`,
+                error: missingBinaryError,
             });
         });
     });

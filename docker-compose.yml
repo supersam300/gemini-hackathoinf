@@ -11,6 +11,8 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      OLLAMA_MODEL: gemma3:latest
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
