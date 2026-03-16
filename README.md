@@ -1,226 +1,172 @@
-# SimuIDE Web - UI Navigator
+# SimuIDE
 
-A powerful, multimodal AI-powered circuit simulator and IDE. Drag and drop electronic components, design complex circuits, code your microcontrollers in C/C++, and simulate everything directly in the browser with the help of a Gemini-powered Visual UI Agent.
+AI-assisted Arduino workspace: describe a project in plain English, and SimuIDE can place components, wire circuits, generate C++ code, verify builds, and run simulation.
 
-## Core Focus: Visual UI Understanding & Interaction
+This README is written as a reproducible runbook so a new machine can get from clone to working app.
 
-Build and test circuits with an agent that becomes your "hands on screen". The integrated Gemini agent observes the browser display, interprets visual elements (with or without relying on APIs or DOM access), and performs actions based on your intent.
+## What You Need
 
-## Key Features
+- Node.js 20+
+- npm 10+
+- Python 3.10+ (3.11/3.12 recommended)
+- `arduino-cli` installed and available in `PATH`
+- Gemini API key
+- MongoDB Atlas URI
 
-- **Interactive Circuit Canvas:** Dynamic SVG-based grid for precision component placement and wiring.
-- **Visual Gemini AI Agent:** Multimodal Visual QA agent that captures screenshots of your circuit and uses Gemini 1.5 Flash to debug wiring, suggest improvements, and execute canvas actions.
-- **Advanced IDE Features:** Dynamic multi-file support (create `.ino`, `.cpp`, `.h` files) and project export as ZIP (includes all code and circuit data).
-- **Simultaneous Simulation:** Real-time AVR simulation for Arduino (Uno, Nano, Mega) and ESP32 boards powered by `avr8js`.
-- **Cloud Connectivity:** Seamlessly sync projects to MongoDB Atlas with semantic search capabilities.
+## 1) Clone And Install
 
-## Prerequisites
-
-- **Node.js**: v20 or higher
-- **Python**: v3.10 or higher (for AI Agent)
-- **Arduino CLI**: Required for code compilation and uploads. [Installation Guide](https://arduino.github.io/arduino-cli/latest/installation/)
-- **Google Gemini API Key**: Obtain one from [Google AI Studio](https://aistudio.google.com/).
-- **MongoDB Atlas**: A connection string for project syncing.
-
-## Local Development
-
-### 1. Environment Setup
-Create a `.env` file in the root directory (and `server/` directory if running backend separately):
-```env
-GEMINI_API_KEY=your_gemini_api_key_here
-MONGODB_URI=your_mongodb_atlas_connection_string
-PORT=3000
-GEMINI_AGENT_MODEL=gemini-1.5-flash
-# Optional overrides for local tool discovery:
-# ARDUINO_CLI_PATH=C:\Program Files\Arduino CLI\arduino-cli.exe
-# PYTHON_EXECUTABLE=C:\Users\<you>\AppData\Local\Programs\Python\Python313\python.exe
-```
-
-### 2. Frontend & Backend
-Clone the repository and install Node.js dependencies:
 ```bash
+git clone <your-repo-url>
+cd gemini-hackathoinf
+
 npm install
-cd server && npm install
-cd ..
+cd server && npm install && cd ..
 ```
 
-### 3. AI Agent (Python) Setup
-The AI agent requires a Python environment. It's recommended to use a virtual environment:
+## 2) Configure Environment
+
+Create `.env` in the project root:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key
+MONGODB_URI=your_mongodb_atlas_uri
+GEMINI_AGENT_MODEL=gemini-2.5-flash
+PORT=3000
+
+# Optional, if tools are not auto-detected:
+# ARDUINO_CLI_PATH=/absolute/path/to/arduino-cli
+# PYTHON_EXECUTABLE=/absolute/path/to/python3
+```
+
+Optional: if you run backend independently, mirror these values in `server/.env`.
+
+## 3) Python Agent Setup
+
 ```bash
-python -m venv venv
-# On Windows:
-.\venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate        # macOS/Linux
+# .venv\Scripts\activate         # Windows PowerShell
 
 pip install -r requirements.txt
 ```
 
-The Python builder agent now uses Google GenAI with ADK-compatible runtime dependencies and keeps the same stdin/stdout JSON contract expected by the Node route.
+## 4) Arduino CLI Setup (Required For Build/Upload)
 
-### Windows Notes
-- Install Arduino CLI with `winget install ArduinoSA.CLI`.
-- Install Python 3 (includes `py` launcher by default).
-- If the backend cannot find either tool, set `ARDUINO_CLI_PATH` and `PYTHON_EXECUTABLE` in `server/.env`.
+Install `arduino-cli` first:
 
-### 4. Running the Application
-Start both the Vite frontend and Expres backend using:
+- macOS: `brew install arduino-cli`
+- Windows: `winget install ArduinoSA.CLI`
+- Linux: follow [official install docs](https://arduino.github.io/arduino-cli/latest/installation/)
+
+Then install core packages:
+
+```bash
+arduino-cli version
+arduino-cli core update-index
+arduino-cli core install arduino:avr
+```
+
+## 5) Start The App
+
+Use the unified command (recommended):
+
 ```bash
 npm run dev:full
 ```
-Open `http://localhost:5173` for the frontend.
 
-## Running with Docker
+Open `http://localhost:5173`.
 
-You can run the entire stack (Frontend, Backend, and AI Agent) in a containerized environment.
+This command starts:
+- Vite frontend (`5173`)
+- Express backend (`3000`)
 
-### Using Docker Compose
+## 6) Smoke Test (Replication Check)
+
+1. Open AI chat and prompt: `create a project with alternating blinking leds`
+2. Confirm components are placed and labels are clean (no raw JSON blobs)
+3. Click **Wire components for me** and confirm wires complete
+4. Click **Build Project** and confirm compile output appears
+
+If backend is not reachable, the app now points to the canonical recovery command:
+`npm run dev:full`
+
+## Common Issues And Fixes
+
+### `Could not reach the Arduino server ... (HTTP 503)`
+
+Cause: backend not running or proxy cannot reach it.
+
+Fix:
+
+```bash
+npm run dev:full
+```
+
+If still failing:
+- check `http://localhost:3000/health` returns `{ "ok": true }`
+- ensure `.env` is present
+- ensure port `3000` is free
+
+### `Failed to start arduino-cli` / compile errors from CLI missing
+
+Fix:
+- install `arduino-cli`
+- run:
+  - `arduino-cli core update-index`
+  - `arduino-cli core install arduino:avr`
+- set `ARDUINO_CLI_PATH` if binary is not in `PATH`
+
+### Python agent not launching
+
+Fix:
+- activate `.venv`
+- `pip install -r requirements.txt`
+- set `PYTHON_EXECUTABLE` if needed
+
+## Docker (Optional)
+
+### Compose
+
 ```bash
 docker-compose up --build
 ```
 
-### Using Dockerfile (Production)
+### Single image
+
 ```bash
 docker build -t simuide-web .
 docker run -p 3000:3000 --env-file .env simuide-web
 ```
 
-## Technology Stack
+## Google Cloud Run / Cloud Build (Optional)
 
-- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS
-- **AI Engine:** Google Gemini (1.5 Flash & 1.5 Pro) via `google-genai` Python SDK
-- **Builder Agent Runtime:** GenAI ADK-compatible Python agent (`server/services/agent.py`) invoked by backend subprocess
-- **Backend:** Node.js, Express, MongoDB Atlas
-- **Simulation:** AVR8js & `@wokwi/elements`
-- **Compiler:** `arduino-cli` integrated into the backend pipeline
+Project includes `cloudbuild.yaml` for automated build and deploy.
 
-## Project Structure
+High-level:
 
-```text
-.
-├── server/                     # Express Backend
-│   ├── index.js                # Server entry point & static file serving
-│   ├── routes/                 # API Routes (AI, Arduino, Circuits)
-│   ├── services/               # Core logic (Gemini integration)
-│   └── models/                 # MongoDB Schemas (Circuit, Document)
-├── src/                        # React Frontend
-│   ├── app/                    # Main application logic
-│   │   ├── components/         # UI Components (Canvas, AI Panel, Menu)
-│   │   └── components/arduino-ide/ # Complex IDE sub-system
-│   ├── store/                  # Zustand state management
-│   ├── api/                    # Frontend API clients
-│   └── main.tsx                # Frontend entry point
-├── Dockerfile                  # Production build script
-├── docker-compose.yml          # Local container orchestration
-└── README.md                   # You are here
-```
+1. Enable APIs: Cloud Run, Cloud Build, Artifact Registry, Secret Manager
+2. Create Artifact Registry repo in `asia-south1`
+3. Create secrets (`GEMINI_API_KEY`, `MONGODB_URI`)
+4. Grant Cloud Build service account permissions:
+   - `roles/run.admin`
+   - `roles/iam.serviceAccountUser`
+   - `roles/secretmanager.secretAccessor`
+5. Create Cloud Build trigger for `main`
 
-## Documentation
+See `DOCKER.md` for detailed commands.
 
-Detailed documentation about specific parts of the project can be found in the following files:
+## Tech Stack
 
-- [`FRONTEND.md`](./FRONTEND.md) - Detailed guide to the React frontend architecture, stores, and components.
-- [`PROJECT_STRUCTURE.md`](./PROJECT_STRUCTURE.md) - Overview of the directory layout and initial sprint framework.
-- [`DOCKER.md`](./DOCKER.md) - Containerization instructions and deployment setups.
-- [`MONGODB_EXPORT.md`](./MONGODB_EXPORT.md) - Database schema and data export documentation.
+- Frontend: React, TypeScript, Vite, Zustand, `@wokwi/elements`
+- Backend: Node.js, Express, Mongoose
+- AI: Gemini (`@google/genai`) + Python agent runtime
+- Simulation: `avr8js`
+- Build/Upload: `arduino-cli`
+- Deployment: Docker, Cloud Run, Cloud Build
 
-## Deployment to Google Cloud
+## Extra Docs
 
-This project is optimized for deployment on **Google Cloud Platform (GCP)**.
-
-### 1. CI/CD Automation with Cloud Build Trigger (Production)
-This repository includes `cloudbuild.yaml` for automated build + deploy to Cloud Run.
-
-One-time setup:
-
-```bash
-# Set project context
-gcloud config set project PROJECT_ID
-
-# Enable required APIs
-gcloud services enable \
-  run.googleapis.com \
-  cloudbuild.googleapis.com \
-  artifactregistry.googleapis.com \
-  secretmanager.googleapis.com
-
-# Create Artifact Registry Docker repo
-gcloud artifacts repositories create simuide \
-  --repository-format=docker \
-  --location=asia-south1 \
-  --description="SimuIDE production images"
-
-# Create runtime secrets (update values as needed)
-printf '%s' 'YOUR_GEMINI_API_KEY' | gcloud secrets create GEMINI_API_KEY --data-file=- || true
-printf '%s' 'YOUR_MONGODB_URI' | gcloud secrets create MONGODB_URI --data-file=- || true
-
-# Add new versions when rotating values
-printf '%s' 'YOUR_GEMINI_API_KEY' | gcloud secrets versions add GEMINI_API_KEY --data-file=-
-printf '%s' 'YOUR_MONGODB_URI' | gcloud secrets versions add MONGODB_URI --data-file=-
-```
-
-Grant Cloud Build access to deploy Cloud Run and read secrets:
-
-```bash
-PROJECT_NUMBER="$(gcloud projects describe PROJECT_ID --format='value(projectNumber)')"
-CLOUDBUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
-
-gcloud projects add-iam-policy-binding PROJECT_ID \
-  --member="serviceAccount:${CLOUDBUILD_SA}" \
-  --role="roles/run.admin"
-
-gcloud projects add-iam-policy-binding PROJECT_ID \
-  --member="serviceAccount:${CLOUDBUILD_SA}" \
-  --role="roles/iam.serviceAccountUser"
-
-gcloud projects add-iam-policy-binding PROJECT_ID \
-  --member="serviceAccount:${CLOUDBUILD_SA}" \
-  --role="roles/secretmanager.secretAccessor"
-```
-
-Create trigger (GitHub repo example):
-
-```bash
-gcloud builds triggers create github \
-  --name="simuide-prod-main" \
-  --repo-name="REPO_NAME" \
-  --repo-owner="GITHUB_OWNER" \
-  --branch-pattern="^main$" \
-  --build-config="cloudbuild.yaml" \
-  --substitutions="_REGION=asia-south1,_SERVICE_NAME=simuide,_REPO_NAME=simuide,_IMAGE_NAME=web,_ALLOW_UNAUTHENTICATED=true,_GEMINI_AGENT_MODEL=gemini-2.5-flash,_GEMINI_API_KEY_SECRET=GEMINI_API_KEY,_MONGODB_URI_SECRET=MONGODB_URI"
-```
-
-### 2. Required Runtime Configuration
-Cloud Run deploy step sets:
-- `NODE_ENV=production`
-- `PORT=3000`
-- `GEMINI_AGENT_MODEL=gemini-2.5-flash` (override via trigger substitutions)
-
-Cloud Run deploy step reads secrets via Secret Manager:
-- `GEMINI_API_KEY`
-- `MONGODB_URI`
-
-### 3. Manual Operations (if needed)
-Manual deploy from latest commit:
-
-```bash
-gcloud builds submit --config cloudbuild.yaml \
-  --substitutions="_REGION=asia-south1,_SERVICE_NAME=simuide,_REPO_NAME=simuide,_IMAGE_NAME=web"
-```
-
-Rollback to previous revision:
-
-```bash
-gcloud run revisions list --service=simuide --region=asia-south1
-gcloud run services update-traffic simuide \
-  --region=asia-south1 \
-  --to-revisions REVISION_NAME=100
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- `FRONTEND.md`
+- `PROJECT_STRUCTURE.md`
+- `DOCKER.md`
+- `MONGODB_EXPORT.md`
