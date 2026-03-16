@@ -524,6 +524,7 @@ export default function App() {
       let shouldStartSimulation = false;
       let shouldStopSimulation = false;
       let shouldVerifyBuild = false;
+      const createdRefMap = new Map<string, string>();
 
       const normalizeActionType = (value: unknown) => {
         const t = String(value || '').trim().toUpperCase();
@@ -554,7 +555,10 @@ export default function App() {
           try {
             const repaired = raw
               .replace(/([{,]\s*)'([^']+?)'\s*:/g, '$1"$2":')
-              .replace(/:\s*'([^']*?)'(\s*[},])/g, ': "$1"$2');
+              .replace(/:\s*'([^']*?)'(\s*[},])/g, ': "$1"$2')
+              .replace(/\bNone\b/g, 'null')
+              .replace(/\bTrue\b/g, 'true')
+              .replace(/\bFalse\b/g, 'false');
             return JSON.parse(repaired);
           } catch {
             return null;
@@ -578,9 +582,26 @@ export default function App() {
         .filter((a: any) => a && typeof a === 'object');
 
       const norm = (v: unknown) => String(v || '').trim().toLowerCase();
+      const sanitizeToken = (v: unknown) => String(v || '')
+        .replace(/[\{\}\[\]]/g, '')
+        .replace(/^["']|["']$/g, '')
+        .trim();
+      const toNumber = (v: unknown): number | null => {
+        if (typeof v === 'number' && Number.isFinite(v)) return v;
+        const parsed = Number.parseFloat(String(v ?? '').replace(/[^\d.-]/g, ''));
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+      const findAutoPosition = (compType: string) => {
+        const sameTypeCount = nextComponents.filter(c => c.type === compType).length;
+        const col = sameTypeCount % 4;
+        const row = Math.floor(sameTypeCount / 4);
+        return { x: 180 + col * 120, y: 120 + row * 90 };
+      };
       const resolveComponentId = (ref: unknown): string | null => {
-        const token = String(ref || '').trim();
+        const token = sanitizeToken(ref);
         if (!token) return null;
+        const mapped = createdRefMap.get(token.toLowerCase());
+        if (mapped) return mapped;
         // exact ID
         const exact = nextComponents.find(c => c.id === token);
         if (exact) return exact.id;
@@ -641,20 +662,29 @@ export default function App() {
       };
 
       const parseEndpointFromAction = (action: any, side: 'from' | 'to') => {
-        const endpointRaw = action?.[side];
+        const endpointRaw = action?.[side] ?? action?.[side.toUpperCase()];
         if (typeof endpointRaw === 'object' && endpointRaw !== null) {
-          const compRef = endpointRaw.componentId || endpointRaw.component || endpointRaw.id || endpointRaw.label;
-          const pin = endpointRaw.pin || endpointRaw.pinName || endpointRaw.handle;
+          const compRef = endpointRaw.componentId || endpointRaw.component || endpointRaw.id || endpointRaw.label || endpointRaw.ID || endpointRaw.LABEL;
+          const pin = endpointRaw.pin || endpointRaw.pinName || endpointRaw.handle || endpointRaw.PIN || endpointRaw.PINNAME;
           if (!compRef) return null;
           return parseEndpoint(`${compRef}:${pin || ''}`, side);
         }
         if (!endpointRaw) {
-          const compRef = action?.[`${side}ComponentId`] || action?.[`${side}Id`] || action?.[`${side}Label`];
-          const pin = action?.[`${side}Pin`] || action?.[`${side}PinName`] || action?.[`${side}Handle`];
+          const compRef = action?.[`${side}ComponentId`] || action?.[`${side}Id`] || action?.[`${side}Label`] || action?.[`${side.toUpperCase()}COMPONENTID`] || action?.[`${side.toUpperCase()}ID`];
+          const pin = action?.[`${side}Pin`] || action?.[`${side}PinName`] || action?.[`${side}Handle`] || action?.[`${side.toUpperCase()}PIN`];
           if (!compRef) return null;
           return parseEndpoint(`${compRef}:${pin || ''}`, side);
         }
         return parseEndpoint(endpointRaw, side);
+      };
+      const inferActionType = (action: any) => {
+        const explicit = normalizeActionType(
+          action?.type || action?.action || action?.ACTION || action?.operation || action?.OPERATION
+        );
+        if (explicit) return explicit;
+        if ((action?.from || action?.FROM || action?.to || action?.TO)) return 'ADD_WIRE';
+        if ((action?.componentType || action?.COMPONENTTYPE || action?.name || action?.NAME)) return 'PLACE_COMPONENT';
+        return '';
       };
 
       const normalizeIncomingCode = (rawCode: unknown): string => {
@@ -750,9 +780,7 @@ export default function App() {
       };
 
       normalizedActions.forEach((action: any) => {
-        const actionType = normalizeActionType(
-          action?.type || action?.action || action?.ACTION || action?.operation || action?.OPERATION
-        );
+        const actionType = inferActionType(action);
         switch (actionType) {
           case 'PLACE_COMPONENT': {
             // Use action.id or action.label as the deterministc ID so wires can connect to it.
@@ -765,13 +793,20 @@ export default function App() {
             }
             if (!componentType) break;
 
-            const compLabel = action.label || action.LABEL || action.componentId || action.COMPONENTID || action.id || action.ID || componentType.toUpperCase();
-            const compId = action.id || action.ID || action.componentId || action.COMPONENTID || action.label || action.LABEL || `${componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+            const rawLabel = action.label || action.LABEL || action.componentId || action.COMPONENTID || action.id || action.ID;
+            const rawId = action.id || action.ID || action.componentId || action.COMPONENTID || rawLabel;
+            const compLabel = sanitizeToken(rawLabel) || componentType.toUpperCase();
+            const compId = sanitizeToken(rawId) || `${componentType}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+            const px = toNumber(action.x ?? action.X);
+            const py = toNumber(action.y ?? action.Y);
+            const auto = findAutoPosition(componentType);
+            const x = px ?? auto.x;
+            const y = py ?? auto.y;
             const newComp: PlacedComponent = {
               id: compId,
               type: componentType,
-              x: action.x ?? action.X ?? 100,
-              y: action.y ?? action.Y ?? 100,
+              x,
+              y,
               label: compLabel,
               selected: false,
               rotation: 0,
@@ -779,9 +814,11 @@ export default function App() {
             };
             if (!nextComponents.some(c => c.id === newComp.id)) {
               nextComponents.push(newComp);
+              createdRefMap.set(compId.toLowerCase(), newComp.id);
+              createdRefMap.set(compLabel.toLowerCase(), newComp.id);
               componentsChanged = true;
             }
-            setStatusMessage(`AI placed ${action.componentType}`);
+            setStatusMessage(`AI placed ${componentType}`);
             break;
           }
           case 'ADD_WIRE': {
