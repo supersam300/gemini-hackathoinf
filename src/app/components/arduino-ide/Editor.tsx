@@ -94,6 +94,7 @@ function CodeEditor({
   const [cursorLine, setCursorLine] = useState(1);
   const [cursorCol, setCursorCol] = useState(1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const overlayRef = useRef<HTMLPreElement>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Tab key → insert 2 spaces
@@ -121,6 +122,14 @@ function CodeEditor({
     setCursorCol(colNum);
   };
 
+  const handleEditorScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
+    const ta = e.currentTarget;
+    if (overlayRef.current) {
+      overlayRef.current.scrollTop = ta.scrollTop;
+      overlayRef.current.scrollLeft = ta.scrollLeft;
+    }
+  };
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden" style={{ background: dm ? "#1e1e1e" : "#ffffff" }}>
       {/* Editor scroll area */}
@@ -130,6 +139,7 @@ function CodeEditor({
         <div className="relative flex-1">
           {/* Syntax highlighted overlay */}
           <pre
+            ref={overlayRef}
             className="absolute inset-0 pointer-events-none pt-3 pl-4 pr-4"
             style={{
               fontFamily: FONT,
@@ -137,7 +147,7 @@ function CodeEditor({
               lineHeight: "20px",
               color: "#D4D4D4",
               whiteSpace: "pre",
-              overflow: "hidden",
+              overflow: "auto",
               tabSize: 2,
             }}
           >
@@ -151,6 +161,7 @@ function CodeEditor({
             onKeyDown={handleKeyDown}
             onClick={handleCursorChange}
             onKeyUp={handleCursorChange}
+            onScroll={handleEditorScroll}
             className="absolute inset-0 w-full h-full resize-none outline-none bg-transparent pt-3 pl-4 pr-4"
             style={{
               fontFamily: FONT,
